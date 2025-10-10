@@ -1,0 +1,1 @@
+for f in *.log; do mv "$f" "${f%.log}_$(date +%Y%m%d_%H%M%S).log"; done
