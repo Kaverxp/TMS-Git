@@ -1,0 +1,1 @@
+sed -E ':a; s/([[:alpha:]]+)[[:space:]]+\1/\1/g; ta'
