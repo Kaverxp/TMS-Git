@@ -1,0 +1,1 @@
+grep -oE '[[:alpha:]]+(-[[:alpha:]]+)*' | wc -l
