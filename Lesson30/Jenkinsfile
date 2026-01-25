@@ -32,7 +32,7 @@ pipeline {
     environment {
         APP_NAME = 'tms-app'
         BUILD_ID = "${BUILD_NUMBER}"
-        PROJECT_DIR = 'Lesson30'  # ← Новая переменная для пути
+        PROJECT_DIR = 'Lesson30'
     }
     
     options {
@@ -65,7 +65,6 @@ pipeline {
                     url: 'https://github.com/Kaverxp/TMS-Git.git',
                     poll: false
                 
-                // Переходим в папку проекта
                 dir(env.PROJECT_DIR) {
                     sh '''
                         echo "Содержимое папки Lesson30:"
@@ -88,7 +87,6 @@ pipeline {
                 dir(env.PROJECT_DIR) {
                     script {
                         try {
-                            // Проверяем наличие скриптов в папке Lesson30
                             if (fileExists('deploy.groovy')) {
                                 echo "✅ Найден deploy.groovy"
                             } else {
@@ -124,7 +122,6 @@ pipeline {
                 dir(env.PROJECT_DIR) {
                     script {
                         try {
-                            // Тестирование Groovy скрипта
                             echo "Тестирование Groovy скрипта..."
                             sh '''
                                 echo "Проверка синтаксиса Groovy:"
@@ -134,7 +131,6 @@ pipeline {
                                 head -20 deploy.groovy | grep -q "def call" && echo "✅ Структура скрипта корректна" || echo "⚠ Нестандартная структура"
                             '''
                             
-                            // Тестирование Python DSL
                             echo "Тестирование Python DSL..."
                             sh '''
                                 echo "Проверка Python скрипта:"
@@ -144,7 +140,6 @@ pipeline {
                                 python3 report_dsl.py --help 2>&1 | head -5
                             '''
                             
-                            // Создаём тестовый отчёт
                             junit(
                                 testResults: 'test-reports/*.xml', 
                                 allowEmptyResults: true
@@ -178,15 +173,12 @@ pipeline {
                 dir(env.PROJECT_DIR) {
                     script {
                         try {
-                            // Проверяем наличие Python
                             sh '''
                                 python3 --version || python --version || echo "Python не найден"
                             '''
                             
-                            // Создаём директорию для отчётов
                             sh 'mkdir -p generated_reports'
                             
-                            // Генерируем отчёт с использованием DSL
                             sh """
                                 echo "Запуск DSL генератора отчётов..."
                                 python3 report_dsl.py \
@@ -200,7 +192,6 @@ pipeline {
                                     --filter image_tag=${params.IMAGE_TAG}
                             """
                             
-                            // Копируем отчёты в корень workspace для доступа Jenkins
                             sh '''
                                 echo "Копируем отчёты..."
                                 cp -r generated_reports/ ../ 2>/dev/null || true
@@ -209,7 +200,6 @@ pipeline {
                         } catch (Exception e) {
                             echo "⚠ Ошибка генерации отчёта: ${e.message}"
                             
-                            // Создаём простой отчёт в случае ошибки
                             sh '''
                                 echo "Создаю простой отчёт..."
                                 mkdir -p generated_reports
@@ -237,7 +227,6 @@ EOF
                         sh 'ls -la generated_reports/'
                     }
                     
-                    // Публикуем HTML отчёт если есть
                     script {
                         if (params.REPORT_FORMAT == 'html') {
                             publishHTML(
@@ -254,7 +243,6 @@ EOF
                     }
                 }
                 always {
-                    // Сохраняем отчёты как артефакты
                     archiveArtifacts artifacts: "${env.PROJECT_DIR}/generated_reports/**", fingerprint: true
                 }
             }
@@ -270,7 +258,6 @@ EOF
                 dir(env.PROJECT_DIR) {
                     script {
                         try {
-                            // Загружаем и выполняем Groovy скрипт
                             def deployScript = load 'deploy.groovy'
                             
                             deployScript.call([
@@ -297,7 +284,6 @@ EOF
                 }
                 failure {
                     echo "❌ Ошибка деплоя"
-                    // Откат
                     sh '''
                         echo "Попытка отката..."
                         docker ps -a --filter "name=tms-app.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
@@ -341,7 +327,6 @@ EOF
                 echo "🧹 Очистка после выполнения..."
                 
                 script {
-                    // Сохраняем логи перед очисткой
                     sh '''
                         echo "Сохранение логов..."
                         mkdir -p logs
@@ -349,7 +334,6 @@ EOF
                         date > logs/completion_time.txt
                     '''
                     
-                    // Очищаем Docker (только контейнеры задания 30)
                     sh '''
                         echo "Очистка контейнеров задания 30..."
                         docker ps -a --filter "name=.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
@@ -383,7 +367,6 @@ EOF
             Ссылка на сборку: ${env.BUILD_URL}
             """
             
-            // Архивируем все артефакты задания
             archiveArtifacts artifacts: "${env.PROJECT_DIR}/**", fingerprint: true
         }
         
@@ -435,7 +418,6 @@ EOF
             Папка с файлами задания: ${env.PROJECT_DIR}/
             """
             
-            // Финальная очистка
             cleanWs(deleteDirs: true)
         }
     }
