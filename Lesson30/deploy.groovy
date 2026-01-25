@@ -5,17 +5,16 @@ def call(Map config = [:]) {
     def imageTag = config.imageTag ?: 'latest'
     def containerName = config.containerName ?: 'app-container'
     def port = config.port ?: 8080
-    def appUrl = config.appUrl ?: "http://localhost:${port}"
     
     node {
         stage('Build Docker Image') {
             echo "🐳 Сборка Docker-образа: ${imageName}:${imageTag}"
             
-            // Создаём простой Dockerfile
-            sh '''
+            // Создаём Dockerfile с правильным синтаксисом
+            sh """
                 cat > Dockerfile << 'EOF'
 FROM nginx:alpine
-RUN echo "<!DOCTYPE html>
+RUN echo '<!DOCTYPE html>
 <html>
 <head><title>ТМС Приложение</title>
 <style>
@@ -25,26 +24,26 @@ body { font-family: Arial; margin: 40px; }
 </style>
 </head>
 <body>
-<div class='header'>
+<div class="header">
 <h1>🚀 ТМС Приложение развёрнуто!</h1>
 <p>Pipeline успешно выполнен</p>
 </div>
-<div class='content'>
+<div class="content">
 <h2>Информация о деплое:</h2>
 <ul>
-<li>Окружение: ''' + config.environment + '''</li>
-<li>Версия: ''' + config.imageTag + '''</li>
-<li>Сборка: ''' + config.buildNumber + '''</li>
-<li>Время: $(date)</li>
+<li>Окружение: ${config.environment ?: 'dev'}</li>
+<li>Версия: ${config.imageTag ?: 'latest'}</li>
+<li>Сборка: ${config.buildNumber ?: 'N/A'}</li>
+<li>Время: \$(date)</li>
 </ul>
-<p>Статус: <span style='color: green; font-weight: bold;'>✅ Работает</span></p>
+<p>Статус: <span style="color: green; font-weight: bold;">✅ Работает</span></p>
 </div>
 </body>
-</html>" > /usr/share/nginx/html/index.html
+</html>' > /usr/share/nginx/html/index.html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 EOF
-            '''
+            """
             
             sh "docker build -t ${imageName}:${imageTag} ."
         }
@@ -87,7 +86,7 @@ EOF
                 
                 echo "✅ Контейнер работает (статус: ${containerStatus})"
                 
-                // HTTP-проверка с улучшенной обработкой
+                // HTTP-проверка с таймаутом
                 sh """
                     echo "Проверка HTTP доступности..."
                     if timeout 10 curl -s -f http://localhost:${port} > /dev/null; then
@@ -95,17 +94,10 @@ EOF
                     else
                         echo "⚠ Проблемы с HTTP доступностью, но контейнер работает"
                         echo "Логи контейнера:"
-                        docker logs ${containerName} --tail 10
-                        # Не падаем, только предупреждение
+                        docker logs ${containerName} --tail 5
                     fi
                 """
             }
-            
-            // Дополнительная проверка - получаем заголовок страницы
-            sh """
-                echo "Проверка содержимого страницы..."
-                curl -s http://localhost:${port} | grep -q "ТМС Приложение" && echo "✅ Контент страницы корректный" || echo "⚠ Проблемы с контентом"
-            """
         }
     }
     
