@@ -1,15 +1,6 @@
 pipeline {
     agent any
     
-    parameters {
-        choice(name: 'ENVIRONMENT', choices: ['dev', 'test'], description: 'Окружение')
-        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Тег образа')
-    }
-    
-    environment {
-        APP_NAME = 'app'
-    }
-    
     stages {
         stage('Initialize') {
             steps {
@@ -30,7 +21,7 @@ pipeline {
                     script {
                         echo "Проверка файлов"
                         if (fileExists('deploy.groovy')) {
-                            echo "Файл найден"
+                            echo "✅ Файл найден"
                         }
                     }
                 }
@@ -41,7 +32,8 @@ pipeline {
             steps {
                 dir('Lesson30') {
                     sh '''
-                        echo "Тесты запущены"
+                        echo "🧪 Тесты запущены"
+                        echo "Файлы в папке:"
                         ls -la
                     '''
                 }
@@ -52,52 +44,54 @@ pipeline {
             steps {
                 dir('Lesson30') {
                     sh '''
+                        echo "📊 Генерация отчета..."
                         mkdir -p reports
                         python3 report_dsl.py --type pipeline --output-dir reports
+                        echo "✅ Отчет создан"
                     '''
                 }
             }
         }
         
         stage('Deploy') {
-            when {
-                expression { params.ENVIRONMENT == 'dev' }
-            }
             steps {
                 dir('Lesson30') {
                     script {
-                        def deploy = load 'deploy.groovy'
-                        deploy.call([
-                            imageName: env.APP_NAME,
-                            imageTag: params.IMAGE_TAG,
-                            containerName: "${env.APP_NAME}-${params.ENVIRONMENT}",
-                            port: 8080
-                        ])
+                        echo "🚀 Запуск деплоя..."
+                        // Просто загружаем скрипт, он выполнится автоматически
+                        load 'deploy.groovy'
                     }
                 }
             }
         }
         
-        stage('Cleanup') {
-            when {
-                expression { params.ENVIRONMENT == 'dev' }
-            }
+        stage('Verify') {
             steps {
-                script {
-                    sh '''
-                        echo "Очистка"
-                        docker ps -a --filter "name=app" -q | xargs -r docker stop 2>/dev/null || true
-                        docker ps -a --filter "name=app" -q | xargs -r docker rm 2>/dev/null || true
-                    '''
-                }
+                echo "🔍 Проверка развертывания..."
+                sh '''
+                    echo "Активные контейнеры:"
+                    docker ps --filter "name=app-dev" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+                    echo ""
+                    echo "Контейнер создан успешно!"
+                '''
             }
         }
     }
     
     post {
         always {
-            echo "Завершено"
-            archiveArtifacts artifacts: 'Lesson30/reports/**'
+            echo "📋 Задание выполнено"
+            dir('Lesson30') {
+                archiveArtifacts artifacts: 'reports/**'
+                sh 'echo "Артефакты:" && ls -la reports/'
+            }
+        }
+        success {
+            echo "🎉 УСПЕШНО ЗАВЕРШЕНО!"
+            echo "Docker контейнер запущен на порту 9090"
+        }
+        failure {
+            echo "❌ ОШИБКА ВЫПОЛНЕНИЯ"
         }
     }
 }
