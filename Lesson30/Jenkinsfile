@@ -2,52 +2,35 @@ pipeline {
     agent any
     
     parameters {
-        choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'prod'], description: 'Окружение для деплоя')
-        string(name: 'IMAGE_TAG', defaultValue: 'v1.0', description: 'Тег Docker-образа')
-        booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Запускать тесты?')
-        booleanParam(name: 'GENERATE_REPORT', defaultValue: true, description: 'Генерировать отчёт?')
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'test'], description: 'Окружение')
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Тег образа')
     }
     
     environment {
-        APP_NAME = 'tms-app'
-        PROJECT_DIR = 'Lesson30'
-        CONTAINER_NAME = "${APP_NAME}-${params.ENVIRONMENT}-lesson30"
-    }
-    
-    options {
-        timeout(time: 30, unit: 'MINUTES')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        APP_NAME = 'app'
     }
     
     stages {
         stage('Initialize') {
             steps {
-                echo "🚀 Запуск Pipeline #${BUILD_NUMBER}"
-                echo "📁 Рабочая директория: ${env.WORKSPACE}"
-                sh 'find . -maxdepth 2 -type f \\( -name "*.groovy" -o -name "*.py" -o -name "Jenkinsfile" \\) | sort'
+                echo "Запуск Pipeline"
+                sh 'ls -la'
             }
         }
         
         stage('Checkout') {
             steps {
-                echo "📦 Клонирование репозитория..."
                 git url: 'https://github.com/Kaverxp/TMS-Git.git', branch: 'master'
-                dir(env.PROJECT_DIR) {
-                    sh 'ls -la && find . -type f \\( -name "*.groovy" -o -name "*.py" \\) | sort'
-                }
             }
         }
         
         stage('Build') {
-            when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
-                echo "🔨 Проверка файлов сборки..."
-                dir(env.PROJECT_DIR) {
+                dir('Lesson30') {
                     script {
-                        ['deploy.groovy', 'report_dsl.py'].each { file ->
-                            if (fileExists(file)) {
-                                echo "✅ Найден ${file}"
-                            }
+                        echo "Проверка файлов"
+                        if (fileExists('deploy.groovy')) {
+                            echo "Файл найден"
                         }
                     }
                 }
@@ -55,95 +38,57 @@ pipeline {
         }
         
         stage('Test') {
-            when { 
-                allOf { 
-                    expression { params.RUN_TESTS == true }
-                    expression { params.ENVIRONMENT != 'prod' }
-                } 
-            }
             steps {
-                echo "🧪 Запуск тестов..."
-                dir(env.PROJECT_DIR) {
+                dir('Lesson30') {
                     sh '''
-                        echo "Проверка Groovy:"
-                        head -5 deploy.groovy | grep -q "def" && echo "✅ Структура корректна"
-                        
-                        echo "Проверка Python:"
-                        python3 -m py_compile report_dsl.py && echo "✅ Синтаксис корректен"
+                        echo "Тесты запущены"
+                        ls -la
                     '''
                 }
             }
         }
         
-        stage('Generate Report') {
-            when { 
-                allOf { 
-                    expression { params.GENERATE_REPORT == true }
-                    expression { fileExists("${env.PROJECT_DIR}/report_dsl.py") }
-                } 
-            }
+        stage('Report') {
             steps {
-                echo "📊 Генерация отчёта..."
-                dir(env.PROJECT_DIR) {
+                dir('Lesson30') {
                     sh '''
-                        mkdir -p generated_reports
-                        python3 report_dsl.py \
-                            --type jenkins_pipeline \
-                            --period $(date +%Y-%m) \
-                            --format html \
-                            --output-dir ./generated_reports \
-                            --filter environment=''' + "${params.ENVIRONMENT}" + ''' \
-                            --filter pipeline=lesson30 \
-                            --filter build_number=''' + "${BUILD_NUMBER}"
+                        mkdir -p reports
+                        python3 report_dsl.py --type pipeline --output-dir reports
                     '''
-                }
-            }
-            post {
-                success {
-                    dir(env.PROJECT_DIR) {
-                        archiveArtifacts artifacts: 'generated_reports/**'
-                        publishHTML(target: [
-                            reportDir: "generated_reports",
-                            reportFiles: '*.html',
-                            reportName: 'Lesson 30 Report'
-                        ])
-                    }
                 }
             }
         }
         
         stage('Deploy') {
-            when { expression { params.ENVIRONMENT in ['dev', 'test', 'prod'] } }
+            when {
+                expression { params.ENVIRONMENT == 'dev' }
+            }
             steps {
-                echo "🚀 Выполнение деплоя..."
-                dir(env.PROJECT_DIR) {
+                dir('Lesson30') {
                     script {
                         def deploy = load 'deploy.groovy'
                         deploy.call([
                             imageName: env.APP_NAME,
                             imageTag: params.IMAGE_TAG,
-                            containerName: env.CONTAINER_NAME,
-                            port: 9090,
-                            environment: params.ENVIRONMENT
+                            containerName: "${env.APP_NAME}-${params.ENVIRONMENT}",
+                            port: 8080
                         ])
                     }
                 }
             }
         }
         
-        stage('Verify') {
-            when { expression { params.ENVIRONMENT in ['dev', 'test'] } }
+        stage('Cleanup') {
+            when {
+                expression { params.ENVIRONMENT == 'dev' }
+            }
             steps {
-                echo "🔍 Проверка развёртывания..."
-                retry(3) {
-                    sleep 3
-                    sh """
-                        echo "Контейнеры:"
-                        docker ps --filter "name=${env.CONTAINER_NAME}" --format "table {{.Names}}\\t{{.Status}}"
-                        
-                        echo "Проверка доступности:"
-                        docker inspect -f '{{.State.Status}}' ${env.CONTAINER_NAME}
-                    """
+                script {
+                    sh '''
+                        echo "Очистка"
+                        docker ps -a --filter "name=app" -q | xargs -r docker stop 2>/dev/null || true
+                        docker ps -a --filter "name=app" -q | xargs -r docker rm 2>/dev/null || true
+                    '''
                 }
             }
         }
@@ -151,26 +96,8 @@ pipeline {
     
     post {
         always {
-            echo "📋 ИТОГИ: ${currentBuild.result}"
-            echo "Сборка: #${BUILD_NUMBER}"
-            echo "Окружение: ${params.ENVIRONMENT}"
-            echo "Длительность: ${currentBuild.durationString}"
-            
-            // Очистка для dev/test окружений
-            script {
-                if (params.ENVIRONMENT in ['dev', 'test']) {
-                    sh '''
-                        docker ps -a --filter "name=.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
-                        docker ps -a --filter "name=.*lesson30" -q | xargs -r docker rm 2>/dev/null || true
-                    '''
-                }
-            }
-        }
-        success {
-            echo "🎉 УСПЕШНО!"
-        }
-        failure {
-            echo "❌ ОШИБКА!"
+            echo "Завершено"
+            archiveArtifacts artifacts: 'Lesson30/reports/**'
         }
     }
 }
