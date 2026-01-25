@@ -5,21 +5,18 @@ def call(Map config = [:]) {
         stage('Deploy Application') {
             echo "🚀 Начало деплоя с конфигурацией: ${config}"
             
-            // Создаём правильный Dockerfile (FIXED)
-            sh """
+            // Создаём Dockerfile
+            sh '''
                 echo "Создаём Dockerfile..."
                 cat > Dockerfile << 'EOF'
 FROM alpine:latest
 RUN apk add --no-cache curl
-CMD echo "TMS Application v${config.imageTag ?: 'latest'} запущен" && \\
-    echo "Имя контейнера: ${config.containerName ?: 'app-container'}" && \\
-    echo "Порт: ${config.port ?: 8080}" && \\
-    echo "Сервер работает..." && \\
+CMD echo "TMS Application запущен" && \
+    echo "Сервер работает..." && \
     tail -f /dev/null
 EOF
                 
                 echo "✅ Dockerfile создан"
-                echo "Содержимое Dockerfile:"
                 cat Dockerfile
             '''
             
@@ -43,15 +40,10 @@ EOF
                     ${config.imageName ?: 'app'}:${config.imageTag ?: 'latest'}
                 
                 echo "✅ Контейнер запущен"
+                sleep 2
                 
-                # Даём время на запуск
-                sleep 3
-                
-                echo "Проверяем запущенные контейнеры:"
-                docker ps | grep ${config.containerName ?: 'app-container'} || echo "⚠ Контейнер не найден в running состоянии"
-                
-                echo "Все контейнеры (включая остановленные):"
-                docker ps -a | grep ${config.containerName ?: 'app-container'} || echo "Контейнер не существует"
+                echo "Проверяем контейнеры:"
+                docker ps | grep ${config.containerName ?: 'app-container'} || echo "Контейнер не найден в running состоянии"
             """
             
             stage('Health Check') {
@@ -62,23 +54,13 @@ EOF
                     sh """
                         echo "Проверка состояния контейнера..."
                         
-                        # Проверяем, что контейнер существует и запущен
-                        CONTAINER_STATUS=\$(docker ps -a --filter "name=${config.containerName ?: 'app-container'}" --format "{{.Status}}" 2>/dev/null || echo "not found")
-                        echo "Статус контейнера: \${CONTAINER_STATUS}"
-                        
-                        if echo "\${CONTAINER_STATUS}" | grep -q "Up"; then
-                            echo "✅ Контейнер запущен и работает"
-                            
-                            # Пробуем выполнить команду внутри контейнера
-                            docker exec ${config.containerName ?: 'app-container'} echo "✅ Контейнер отвечает на команды"
-                            
-                        elif echo "\${CONTAINER_STATUS}" | grep -q "Exited"; then
-                            echo "⚠ Контейнер завершился. Логи:"
-                            docker logs ${config.containerName ?: 'app-container'} 2>/dev/null | tail -5 || echo "Логи недоступны"
-                            exit 1
-                            
+                        # Проверяем статус контейнера
+                        if docker ps | grep -q ${config.containerName ?: 'app-container'}; then
+                            echo "✅ Контейнер запущен"
+                            docker exec ${config.containerName ?: 'app-container'} echo "✅ Контейнер отвечает"
                         else
-                            echo "❌ Контейнер не найден"
+                            echo "⚠ Контейнер не запущен. Проверяем все контейнеры..."
+                            docker ps -a | grep ${config.containerName ?: 'app-container'} || echo "Контейнер не найден"
                             exit 1
                         fi
                     """
