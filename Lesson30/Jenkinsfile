@@ -160,94 +160,93 @@ pipeline {
             }
         }
         
-stage('Generate Report') {
-    when {
-        allOf {
-            expression { params.GENERATE_REPORT == true }
-            expression { fileExists("${env.PROJECT_DIR}/report_dsl.py") }
-        }
-    }
-    steps {
-        echo "📊 Генерация отчёта с использованием DSL..."
-        
-        dir(env.PROJECT_DIR) {
-            script {
-                try {
-                    sh '''
-                        python3 --version || python --version || echo "Python не найден"
-                    '''
-                    
-                    sh 'mkdir -p generated_reports'
-                    
-                    // Используем правильные аргументы
-                    sh """
-                        echo "Запуск DSL генератора отчётов..."
-                        python3 report_dsl.py \\
-                            --type jenkins_pipeline \\
-                            --period \$(date +%Y-%m) \\
-                            --format ${params.REPORT_FORMAT} \\
-                            --output-dir ./generated_reports \\
-                            --filter environment=${params.ENVIRONMENT} \\
-                            --filter pipeline=lesson30 \\
-                            --filter build_number=${BUILD_NUMBER} \\
-                            --filter image_tag=${params.IMAGE_TAG}
-                    """
-                    
-                    sh '''
-                        echo "Копируем отчёты..."
-                        cp -r generated_reports/ ../ 2>/dev/null || true
-                    '''
-                    
-                } catch (Exception e) {
-                    echo "⚠ Ошибка генерации отчёта: ${e.message}"
-                    
-                    sh '''
-                        echo "Создаю простой отчёт..."
-                        mkdir -p generated_reports
-                        cat > generated_reports/error_report.txt << 'EOF'
+        stage('Generate Report') {
+            when {
+                allOf {
+                    expression { params.GENERATE_REPORT == true }
+                    expression { fileExists("${env.PROJECT_DIR}/report_dsl.py") }
+                }
+            }
+            steps {
+                echo "📊 Генерация отчёта с использованием DSL..."
+                
+                dir(env.PROJECT_DIR) {
+                    script {
+                        try {
+                            sh '''
+                                python3 --version || python --version || echo "Python не найден"
+                            '''
+                            
+                            sh 'mkdir -p generated_reports'
+                            
+                            sh """
+                                echo "Запуск DSL генератора отчётов..."
+                                python3 report_dsl.py \\
+                                    --type jenkins_pipeline \\
+                                    --period \$(date +%Y-%m) \\
+                                    --format ${params.REPORT_FORMAT} \\
+                                    --output-dir ./generated_reports \\
+                                    --filter environment=${params.ENVIRONMENT} \\
+                                    --filter pipeline=lesson30 \\
+                                    --filter build_number=${BUILD_NUMBER} \\
+                                    --filter image_tag=${params.IMAGE_TAG}
+                            """
+                            
+                            sh '''
+                                echo "Копируем отчёты..."
+                                cp -r generated_reports/ ../ 2>/dev/null || true
+                            '''
+                            
+                        } catch (Exception e) {
+                            echo "⚠ Ошибка генерации отчёта: ${e.message}"
+                            
+                            sh '''
+                                echo "Создаю простой отчёт..."
+                                mkdir -p generated_reports
+                                cat > generated_reports/error_report.txt << 'EOF'
 Отчёт о выполнении задания 30
 ============================
 Время: $(date)
-Номер сборки: '${BUILD_NUMBER}'
-Окружение: '${ENVIRONMENT}'
+Номер сборки: ${BUILD_NUMBER}
+Окружение: ${ENVIRONMENT}
 Статус: ERROR
-Ошибка: ${e.message}
+Ошибка при генерации отчёта
 EOF
-                    '''
-                    currentBuild.result = 'UNSTABLE'
+                            '''
+                            currentBuild.result = 'UNSTABLE'
+                        }
+                    }
+                }
+            }
+            
+            post {
+                success {
+                    echo "✅ Отчёт успешно сгенерирован"
+                    
+                    dir(env.PROJECT_DIR) {
+                        sh 'ls -la generated_reports/'
+                    }
+                    
+                    script {
+                        if (params.REPORT_FORMAT == 'html') {
+                            publishHTML(
+                                target: [
+                                    allowMissing: false,
+                                    alwaysLinkToLastBuild: true,
+                                    keepAll: true,
+                                    reportDir: "${env.PROJECT_DIR}/generated_reports",
+                                    reportFiles: '*.html',
+                                    reportName: 'Lesson 30 Report'
+                                ]
+                            )
+                        }
+                    }
+                }
+                always {
+                    archiveArtifacts artifacts: "${env.PROJECT_DIR}/generated_reports/**", fingerprint: true
                 }
             }
         }
-    }
-    
-    post {
-        success {
-            echo "✅ Отчёт успешно сгенерирован"
-            
-            dir(env.PROJECT_DIR) {
-                sh 'ls -la generated_reports/'
-            }
-            
-            script {
-                if (params.REPORT_FORMAT == 'html') {
-                    publishHTML(
-                        target: [
-                            allowMissing: false,
-                            alwaysLinkToLastBuild: true,
-                            keepAll: true,
-                            reportDir: "${env.PROJECT_DIR}/generated_reports",
-                            reportFiles: '*.html',
-                            reportName: 'Lesson 30 Report'
-                        ]
-                    )
-                }
-            }
-        }
-        always {
-            archiveArtifacts artifacts: "${env.PROJECT_DIR}/generated_reports/**", fingerprint: true
-        }
-    }
-}
         
         stage('Execute Groovy Deployment') {
             when {
@@ -368,7 +367,17 @@ EOF
             Ссылка на сборку: ${env.BUILD_URL}
             """
             
-            archiveArtifacts artifacts: "${env.PROJECT_DIR}/**", fingerprint: true
+            // Архивируем файлы задания перед очисткой
+            script {
+                try {
+                    archiveArtifacts artifacts: "${env.PROJECT_DIR}/**", fingerprint: true
+                    echo "✅ Артефакты задания заархивированы"
+                } catch (Exception e) {
+                    echo "⚠ Не удалось заархивировать все артефакты: ${e.message}"
+                    // Пробуем заархивировать только основные файлы
+                    archiveArtifacts artifacts: "**/*.groovy,**/*.py,**/*.md,Jenkinsfile", fingerprint: true
+                }
+            }
         }
         
         failure {
@@ -419,7 +428,15 @@ EOF
             Папка с файлами задания: ${env.PROJECT_DIR}/
             """
             
-            cleanWs(deleteDirs: true)
+            // Финальная очистка в самом конце
+            cleanWs(
+                cleanWhenAborted: true,
+                cleanWhenFailure: true,
+                cleanWhenNotBuilt: true,
+                cleanWhenSuccess: true,
+                cleanWhenUnstable: true,
+                deleteDirs: true
+            )
         }
     }
 }

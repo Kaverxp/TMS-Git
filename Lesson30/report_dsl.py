@@ -87,26 +87,16 @@ class ReportGenerator:
     
     def _fetch_data(self) -> list:
         """Имитация получения данных из БД"""
-        # Используем фильтры если они есть
-        filters = self.config['filters']
-        
-        base_data = [
-            {"id": 1, "name": "Проект А", "value": 150, "status": "active", "environment": "dev"},
-            {"id": 2, "name": "Проект Б", "value": 230, "status": "completed", "environment": "test"},
-            {"id": 3, "name": "Проект В", "value": 75, "status": "pending", "environment": "dev"},
-            {"id": 4, "name": "Проект Г", "value": 300, "status": "active", "environment": "prod"}
+        # Всегда возвращаем тестовые данные
+        return [
+            {"id": 1, "name": "Jenkins Pipeline Lesson 30", "value": 100, "status": "completed", "environment": "dev", "tags": ["jenkins", "pipeline", "lesson30"]},
+            {"id": 2, "name": "Docker Deployment", "value": 200, "status": "active", "environment": "dev", "tags": ["docker", "deployment"]},
+            {"id": 3, "name": "Groovy Script", "value": 150, "status": "active", "environment": "dev", "tags": ["groovy", "automation"]},
+            {"id": 4, "name": "DSL Report Generator", "value": 180, "status": "completed", "environment": "dev", "tags": ["dsl", "report", "python"]},
+            {"id": 5, "name": "TMS Application", "value": 250, "status": "active", "environment": "dev", "tags": ["web", "application"]},
+            {"id": 6, "name": "Build Automation", "value": 120, "status": "pending", "environment": "test", "tags": ["automation", "ci/cd"]},
+            {"id": 7, "name": "Production Deployment", "value": 300, "status": "completed", "environment": "prod", "tags": ["production", "deployment"]}
         ]
-        
-        # Фильтрация данных
-        filtered_data = base_data
-        if filters:
-            for key, value in filters.items():
-                if key == 'environment':
-                    filtered_data = [item for item in filtered_data if item.get('environment') == value]
-                elif key == 'pipeline':
-                    filtered_data = [item for item in filtered_data if item.get('name', '').lower().find(value.lower()) != -1]
-        
-        return filtered_data
     
     def _generate_summary(self) -> Dict[str, Any]:
         """Генерация сводки"""
