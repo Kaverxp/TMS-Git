@@ -52,8 +52,8 @@ pipeline {
                     echo "Структура репозитория:"
                     find . -maxdepth 2 -type f -name "*.groovy" -o -name "*.py" -o -name "Jenkinsfile" | sort
                     echo ""
-                    echo "Содержимое папки ${PROJECT_DIR}:"
-                    ls -la ${PROJECT_DIR} 2>/dev/null || echo "Папка не найдена"
+                    echo "Содержимое папки \${PROJECT_DIR}:"
+                    ls -la \${PROJECT_DIR} 2>/dev/null || echo "Папка не найдена"
                 """
             }
         }
@@ -183,7 +183,7 @@ pipeline {
                                 echo "Запуск DSL генератора отчётов..."
                                 python3 report_dsl.py \
                                     --type jenkins_pipeline \
-                                    --period $(date +%Y-%m-%d) \
+                                    --period \$(date +%Y-%m-%d) \
                                     --format ${params.REPORT_FORMAT} \
                                     --output-dir ./generated_reports \
                                     --filter environment=${params.ENVIRONMENT} \
@@ -203,12 +203,12 @@ pipeline {
                             sh '''
                                 echo "Создаю простой отчёт..."
                                 mkdir -p generated_reports
-                                cat > generated_reports/error_report.txt << EOF
+                                cat > generated_reports/error_report.txt << 'EOF'
 Отчёт о выполнении задания 30
 ============================
 Время: $(date)
-Номер сборки: ${BUILD_NUMBER}
-Окружение: ${ENVIRONMENT}
+Номер сборки: \${BUILD_NUMBER}
+Окружение: \${ENVIRONMENT}
 Статус: ERROR
 Ошибка: ${e.message}
 EOF
@@ -315,7 +315,7 @@ EOF
                             
                             echo ""
                             echo "Использование диска:"
-                            du -sh ${env.WORKSPACE}/${env.PROJECT_DIR} 2>/dev/null || echo "Не удалось проверить размер"
+                            du -sh \${WORKSPACE}/\${PROJECT_DIR} 2>/dev/null || echo "Не удалось проверить размер"
                         """
                     }
                 }
@@ -330,7 +330,7 @@ EOF
                     sh '''
                         echo "Сохранение логов..."
                         mkdir -p logs
-                        docker logs tms-app-${ENVIRONMENT}-lesson30 2>/dev/null | tail -100 > logs/docker.log || echo "Логи Docker недоступны"
+                        docker logs tms-app-\${ENVIRONMENT}-lesson30 2>/dev/null | tail -100 > logs/docker.log || echo "Логи Docker недоступны"
                         date > logs/completion_time.txt
                     '''
                     
