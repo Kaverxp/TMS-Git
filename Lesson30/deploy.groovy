@@ -11,15 +11,38 @@ def call(Map config = [:]) {
         stage('Build Docker Image') {
             echo "🐳 Сборка Docker-образа: ${imageName}:${imageTag}"
             
-            // Создаём простой Dockerfile если нет своего
-            if (!fileExists('Dockerfile')) {
-                writeFile file: 'Dockerfile', text: """
+            // Создаём Dockerfile с простым веб-сервером
+            writeFile file: 'Dockerfile', text: """
 FROM nginx:alpine
-COPY . /usr/share/nginx/html
-EXPOSE ${port}
+RUN echo "<!DOCTYPE html>
+<html>
+<head><title>ТМС Приложение</title>
+<style>
+body {{ font-family: Arial; margin: 40px; }}
+.header {{ background: #4CAF50; color: white; padding: 20px; }}
+.content {{ padding: 20px; }}
+</style>
+</head>
+<body>
+<div class='header'>
+<h1>🚀 ТМС Приложение развёрнуто!</h1>
+<p>Pipeline успешно выполнен</p>
+</div>
+<div class='content'>
+<h2>Информация о деплое:</h2>
+<ul>
+<li>Окружение: ${config.environment ?: 'dev'}</li>
+<li>Версия: ${config.imageTag ?: 'latest'}</li>
+<li>Сборка: ${config.buildNumber ?: 'N/A'}</li>
+<li>Время: \$(date)</li>
+</ul>
+<p>Статус: <span style='color: green; font-weight: bold;'>✅ Работает</span></p>
+</div>
+</body>
+</html>" > /usr/share/nginx/html/index.html
+EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 """
-            }
             
             sh "docker build -t ${imageName}:${imageTag} ."
         }
@@ -33,7 +56,7 @@ CMD ["nginx", "-g", "daemon off;"]
                 docker rm ${containerName} 2>/dev/null || true
             """
             
-            // Запускаем новый контейнер
+            // Запускаем новый контейнер с веб-сервером
             sh """
                 docker run -d \\
                     --name ${containerName} \\
@@ -41,7 +64,7 @@ CMD ["nginx", "-g", "daemon off;"]
                     ${imageName}:${imageTag}
             """
             
-            echo "✅ Контейнер запущен"
+            echo "✅ Контейнер запущен на порту ${port}"
         }
         
         stage('Health Check') {
@@ -62,26 +85,32 @@ CMD ["nginx", "-g", "daemon off;"]
                 
                 echo "✅ Контейнер работает (статус: ${containerStatus})"
                 
-                // HTTP-проверка (если приложение веб)
-                try {
-                    def httpCode = sh(
-                        script: "curl -s -o /dev/null -w '%{http_code}' ${appUrl} --max-time 5 || echo '000'",
-                        returnStdout: true
-                    ).trim()
-                    
-                    if (httpCode.startsWith('2') || httpCode.startsWith('3')) {
-                        echo "✅ HTTP-статус: ${httpCode}"
-                    } else {
-                        echo "⚠ HTTP-статус: ${httpCode}"
-                        // Не падаем сразу, даём ещё попытки
-                        if (httpCode == '000') {
-                            error "Сервис не отвечает"
-                        }
+                // HTTP-проверка
+                def httpCode = sh(
+                    script: "curl -s -o /dev/null -w '%{http_code}' ${appUrl} --max-time 10 || echo '000'",
+                    returnStdout: true
+                ).trim()
+                
+                if (httpCode == '200') {
+                    echo "✅ HTTP-статус: ${httpCode} - Приложение доступно"
+                } else {
+                    echo "⚠ HTTP-статус: ${httpCode} - Проблемы с доступностью"
+                    // Проверяем логи контейнера
+                    sh """
+                        echo "Логи контейнера:"
+                        docker logs ${containerName} --tail 10 2>/dev/null || echo "Логи недоступны"
+                    """
+                    if (httpCode == '000') {
+                        error "Сервис не отвечает на HTTP запросы"
                     }
-                } catch (Exception e) {
-                    echo "⚠ Ошибка HTTP-проверки: ${e.message}"
                 }
             }
+            
+            // Дополнительная проверка - получаем заголовок страницы
+            sh """
+                echo "Проверка содержимого страницы..."
+                curl -s ${appUrl} | grep -q "ТМС Приложение" && echo "✅ Контент страницы корректный" || echo "⚠ Проблемы с контентом"
+            """
         }
     }
     
