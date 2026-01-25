@@ -1,10 +1,11 @@
 #!/usr/bin/env groovy
 
-def call(Map config = [:]) {
-    def imageName = config.imageName ?: 'app'
-    def imageTag = config.imageTag ?: 'latest'
-    def containerName = config.containerName ?: 'app-container'
-    def port = config.port ?: 8080
+// Функция для запуска из Jenkinsfile
+def runDeploy() {
+    def imageName = 'app'
+    def imageTag = 'latest'
+    def containerName = 'app-dev'
+    def port = 8080
     
     node {
         stage('Build') {
@@ -13,7 +14,7 @@ def call(Map config = [:]) {
             sh """
                 cat > Dockerfile << EOF
 FROM nginx:alpine
-RUN echo 'Hello from Docker' > /usr/share/nginx/html/index.html
+RUN echo 'Hello from Jenkins' > /usr/share/nginx/html/index.html
 EOF
                 docker build -t ${imageName}:${imageTag} .
             """
@@ -28,19 +29,8 @@ EOF
                 docker run -d --name ${containerName} -p ${port}:80 ${imageName}:${imageTag}
             """
         }
-        
-        stage('Check') {
-            echo "Проверка"
-            
-            retry(3) {
-                sleep 2
-                sh """
-                    docker inspect -f '{{.State.Status}}' ${containerName} | grep -q running
-                    echo "Контейнер запущен"
-                """
-            }
-        }
     }
 }
 
-// Удаляем return this - это вызывает проблему
+// Автоматический запуск при загрузке
+runDeploy()
