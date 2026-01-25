@@ -1,69 +1,85 @@
 #!/usr/bin/env groovy
 
 def call(Map config = [:]) {
+    def imageName = config.imageName ?: 'app'
+    def imageTag = config.imageTag ?: 'latest'
+    def containerName = config.containerName ?: 'app-container'
+    def port = config.port ?: 8080
+    def appUrl = config.appUrl ?: "http://localhost:${port}"
+    
     node {
-        stage('Deploy Application') {
-            echo "🚀 Начало деплоя с конфигурацией: ${config}"
+        stage('Build Docker Image') {
+            echo "🐳 Сборка Docker-образа: ${imageName}:${imageTag}"
             
-            // Создаём Dockerfile
-            sh '''
-                echo "Создаём Dockerfile..."
-                cat > Dockerfile << 'EOF'
-FROM alpine:latest
-RUN apk add --no-cache curl
-CMD echo "TMS Application запущен" && \
-    echo "Сервер работает..." && \
-    tail -f /dev/null
-EOF
-                
-                echo "✅ Dockerfile создан"
-                cat Dockerfile
-            '''
+            // Создаём простой Dockerfile если нет своего
+            if (!fileExists('Dockerfile')) {
+                writeFile file: 'Dockerfile', text: """
+FROM nginx:alpine
+COPY . /usr/share/nginx/html
+EXPOSE ${port}
+CMD ["nginx", "-g", "daemon off;"]
+"""
+            }
             
-            // Сборка Docker образа
-            sh "docker build -t ${config.imageName ?: 'app'}:${config.imageTag ?: 'latest'} ."
+            sh "docker build -t ${imageName}:${imageTag} ."
+        }
+        
+        stage('Deploy Container') {
+            echo "🚀 Развёртывание контейнера: ${containerName}"
             
-            // Очистка предыдущего контейнера
+            // Останавливаем и удаляем старый контейнер
             sh """
-                echo "Останавливаем предыдущий контейнер..."
-                docker stop ${config.containerName ?: 'app-container'} 2>/dev/null || true
-                docker rm ${config.containerName ?: 'app-container'} 2>/dev/null || true
-                echo "✅ Очистка завершена"
+                docker stop ${containerName} 2>/dev/null || true
+                docker rm ${containerName} 2>/dev/null || true
             """
             
-            // Запуск нового контейнера
+            // Запускаем новый контейнер
             sh """
-                echo "Запускаем новый контейнер..."
                 docker run -d \\
-                    --name ${config.containerName ?: 'app-container'} \\
-                    -p ${config.port ?: 8080}:${config.port ?: 8080} \\
-                    ${config.imageName ?: 'app'}:${config.imageTag ?: 'latest'}
-                
-                echo "✅ Контейнер запущен"
-                sleep 2
-                
-                echo "Проверяем контейнеры:"
-                docker ps | grep ${config.containerName ?: 'app-container'} || echo "Контейнер не найден в running состоянии"
+                    --name ${containerName} \\
+                    -p ${port}:80 \\
+                    ${imageName}:${imageTag}
             """
             
-            stage('Health Check') {
-                echo "🏥 Проверка здоровья приложения..."
+            echo "✅ Контейнер запущен"
+        }
+        
+        stage('Health Check') {
+            echo "🏥 Проверка здоровья приложения..."
+            
+            retry(5) {
+                sleep 3
                 
-                retry(3) {
-                    sleep 2
-                    sh """
-                        echo "Проверка состояния контейнера..."
-                        
-                        # Проверяем статус контейнера
-                        if docker ps | grep -q ${config.containerName ?: 'app-container'}; then
-                            echo "✅ Контейнер запущен"
-                            docker exec ${config.containerName ?: 'app-container'} echo "✅ Контейнер отвечает"
-                        else
-                            echo "⚠ Контейнер не запущен. Проверяем все контейнеры..."
-                            docker ps -a | grep ${config.containerName ?: 'app-container'} || echo "Контейнер не найден"
-                            exit 1
-                        fi
-                    """
+                // Проверка состояния контейнера
+                def containerStatus = sh(
+                    script: "docker inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null || echo 'not-found'",
+                    returnStdout: true
+                ).trim()
+                
+                if (containerStatus != 'running') {
+                    error "❌ Контейнер не запущен (статус: ${containerStatus})"
+                }
+                
+                echo "✅ Контейнер работает (статус: ${containerStatus})"
+                
+                // HTTP-проверка (если приложение веб)
+                try {
+                    def httpCode = sh(
+                        script: "curl -s -o /dev/null -w '%{http_code}' ${appUrl} --max-time 5 || echo '000'",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (httpCode.startsWith('2') || httpCode.startsWith('3')) {
+                        echo "✅ HTTP-статус: ${httpCode}"
+                    } else {
+                        echo "⚠ HTTP-статус: ${httpCode}"
+                        // Не падаем сразу, даём ещё попытки
+                        if (httpCode == '000') {
+                            error "Сервис не отвечает"
+                        }
+                    }
+                } catch (Exception e) {
+                    echo "⚠ Ошибка HTTP-проверки: ${e.message}"
                 }
             }
         }
