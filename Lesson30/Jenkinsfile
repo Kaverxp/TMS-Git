@@ -39,6 +39,7 @@ pipeline {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
         disableConcurrentBuilds()
+        preserveStashes(buildCount: 5)
     }
     
     stages {
@@ -50,7 +51,7 @@ pipeline {
                 
                 sh """
                     echo "Структура репозитория:"
-                    find . -maxdepth 2 -type f -name "*.groovy" -o -name "*.py" -o -name "Jenkinsfile" | sort
+                    find . -maxdepth 2 -type f \\( -name "*.groovy" -o -name "*.py" -o -name "Jenkinsfile" \\) | sort
                     echo ""
                     echo "Содержимое папки \${PROJECT_DIR}:"
                     ls -la \${PROJECT_DIR} 2>/dev/null || echo "Папка не найдена"
@@ -61,9 +62,12 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo "📦 Клонирование репозитория..."
-                git branch: 'master', 
-                    url: 'https://github.com/Kaverxp/TMS-Git.git',
-                    poll: false
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/master']],
+                    extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: '.']],
+                    userRemoteConfigs: [[url: 'https://github.com/Kaverxp/TMS-Git.git']]
+                ])
                 
                 dir(env.PROJECT_DIR) {
                     sh '''
@@ -71,7 +75,7 @@ pipeline {
                         ls -la
                         echo ""
                         echo "Файлы задания:"
-                        find . -type f -name "*.groovy" -o -name "*.py" | sort
+                        find . -type f \\( -name "*.groovy" -o -name "*.py" \\) | sort
                     '''
                 }
             }
@@ -101,7 +105,6 @@ pipeline {
                             
                         } catch (Exception e) {
                             echo "❌ Ошибка проверки файлов: ${e.message}"
-                            currentBuild.result = 'FAILURE'
                             error e.message
                         }
                     }
@@ -125,7 +128,11 @@ pipeline {
                             echo "Тестирование Groovy скрипта..."
                             sh '''
                                 echo "Проверка синтаксиса Groovy:"
-                                groovy -c deploy.groovy 2>/dev/null || echo "⚠ Не удалось проверить синтаксис Groovy"
+                                if command -v groovy >/dev/null 2>&1; then
+                                    groovy -c deploy.groovy 2>/dev/null && echo "✅ Синтаксис Groovy корректен" || echo "⚠ Не удалось проверить синтаксис Groovy"
+                                else
+                                    echo "⚠ Groovy не установлен, проверка пропущена"
+                                fi
                                 
                                 echo "Проверка скрипта деплоя:"
                                 head -20 deploy.groovy | grep -q "def call" && echo "✅ Структура скрипта корректна" || echo "⚠ Нестандартная структура"
@@ -134,16 +141,15 @@ pipeline {
                             echo "Тестирование Python DSL..."
                             sh '''
                                 echo "Проверка Python скрипта:"
-                                python3 -m py_compile report_dsl.py 2>/dev/null && echo "✅ Python синтаксис корректен" || echo "⚠ Ошибка Python синтаксиса"
+                                if python3 -m py_compile report_dsl.py 2>/dev/null; then
+                                    echo "✅ Python синтаксис корректен"
+                                else
+                                    echo "⚠ Ошибка Python синтаксиса"
+                                fi
                                 
                                 echo "Проверка DSL интерфейса:"
-                                python3 report_dsl.py --help 2>&1 | head -5
+                                python3 report_dsl.py --help 2>&1 | head -5 || true
                             '''
-                            
-                            junit(
-                                testResults: 'test-reports/*.xml', 
-                                allowEmptyResults: true
-                            )
                             
                         } catch (Exception e) {
                             echo "⚠ Тесты завершились с ошибкой: ${e.message}"
@@ -156,6 +162,11 @@ pipeline {
             post {
                 always {
                     echo "📈 Результаты тестирования сохранены"
+                    junit(
+                        testResults: '**/test-reports/*.xml', 
+                        allowEmptyResults: true,
+                        skipPublishingChecks: true
+                    )
                 }
             }
         }
@@ -192,27 +203,22 @@ pipeline {
                                     --filter image_tag=${params.IMAGE_TAG}
                             """
                             
-                            sh '''
-                                echo "Копируем отчёты..."
-                                cp -r generated_reports/ ../ 2>/dev/null || true
-                            '''
-                            
                         } catch (Exception e) {
                             echo "⚠ Ошибка генерации отчёта: ${e.message}"
                             
-                            sh '''
+                            sh """
                                 echo "Создаю простой отчёт..."
                                 mkdir -p generated_reports
-                                cat > generated_reports/error_report.txt << 'EOF'
+                                cat > generated_reports/error_report.txt << EOF
 Отчёт о выполнении задания 30
 ============================
-Время: $(date)
+Время: \$(date)
 Номер сборки: ${BUILD_NUMBER}
-Окружение: ${ENVIRONMENT}
+Окружение: ${params.ENVIRONMENT}
 Статус: ERROR
-Ошибка при генерации отчёта
+Ошибка при генерации отчёта: ${e.message}
 EOF
-                            '''
+                            """
                             currentBuild.result = 'UNSTABLE'
                         }
                     }
@@ -220,30 +226,10 @@ EOF
             }
             
             post {
-                success {
-                    echo "✅ Отчёт успешно сгенерирован"
-                    
-                    dir(env.PROJECT_DIR) {
-                        sh 'ls -la generated_reports/'
-                    }
-                    
-                    script {
-                        if (params.REPORT_FORMAT == 'html') {
-                            publishHTML(
-                                target: [
-                                    allowMissing: false,
-                                    alwaysLinkToLastBuild: true,
-                                    keepAll: true,
-                                    reportDir: "${env.PROJECT_DIR}/generated_reports",
-                                    reportFiles: '*.html',
-                                    reportName: 'Lesson 30 Report'
-                                ]
-                            )
-                        }
-                    }
-                }
                 always {
-                    archiveArtifacts artifacts: "${env.PROJECT_DIR}/generated_reports/**", fingerprint: true
+                    dir(env.PROJECT_DIR) {
+                        archiveArtifacts artifacts: 'generated_reports/**', fingerprint: true
+                    }
                 }
             }
         }
@@ -330,18 +316,34 @@ EOF
                     sh '''
                         echo "Сохранение логов..."
                         mkdir -p logs
-                        docker logs tms-app-\${ENVIRONMENT}-lesson30 2>/dev/null | tail -100 > logs/docker.log || echo "Логи Docker недоступны"
+                        docker logs tms-app-${ENVIRONMENT}-lesson30 2>/dev/null | tail -100 > logs/docker.log || echo "Логи Docker недоступны"
                         date > logs/completion_time.txt
                     '''
-                    
-                    sh '''
-                        echo "Очистка контейнеров задания 30..."
-                        docker ps -a --filter "name=.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
-                        docker ps -a --filter "name=.*lesson30" -q | xargs -r docker rm 2>/dev/null || true
+                }
+            }
+            
+            post {
+                always {
+                    script {
+                        // Архивируем логи перед удалением контейнеров
+                        dir(env.PROJECT_DIR) {
+                            archiveArtifacts artifacts: 'logs/**', fingerprint: true
+                        }
                         
-                        echo "Очистка образов задания 30..."
-                        docker images --filter "reference=*lesson30*" -q | xargs -r docker rmi 2>/dev/null || true
-                    '''
+                        // Удаляем контейнеры только в dev/test окружениях
+                        if (params.ENVIRONMENT in ['dev', 'test']) {
+                            sh '''
+                                echo "Очистка контейнеров задания 30..."
+                                docker ps -a --filter "name=.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
+                                docker ps -a --filter "name=.*lesson30" -q | xargs -r docker rm 2>/dev/null || true
+                                
+                                echo "Очистка образов задания 30..."
+                                docker images --filter "reference=*lesson30*" -q | xargs -r docker rmi 2>/dev/null || true
+                            '''
+                        } else {
+                            echo "⚠ В продакшене контейнеры не удаляются автоматически"
+                        }
+                    }
                 }
             }
         }
@@ -367,15 +369,30 @@ EOF
             Ссылка на сборку: ${env.BUILD_URL}
             """
             
-            // Архивируем файлы задания перед очисткой
+            // Архивируем основные файлы задания
             script {
                 try {
-                    archiveArtifacts artifacts: "${env.PROJECT_DIR}/**", fingerprint: true
+                    dir(env.PROJECT_DIR) {
+                        // Архивируем исходные файлы
+                        archiveArtifacts artifacts: '*.groovy,*.py,*.md,Jenkinsfile', fingerprint: true
+                        
+                        // Публикуем HTML отчёт если есть
+                        if (params.REPORT_FORMAT == 'html' && fileExists('generated_reports')) {
+                            publishHTML(
+                                target: [
+                                    allowMissing: true,
+                                    alwaysLinkToLastBuild: true,
+                                    keepAll: true,
+                                    reportDir: 'generated_reports',
+                                    reportFiles: '*.html',
+                                    reportName: 'Lesson 30 Report'
+                                ]
+                            )
+                        }
+                    }
                     echo "✅ Артефакты задания заархивированы"
                 } catch (Exception e) {
                     echo "⚠ Не удалось заархивировать все артефакты: ${e.message}"
-                    // Пробуем заархивировать только основные файлы
-                    archiveArtifacts artifacts: "**/*.groovy,**/*.py,**/*.md,Jenkinsfile", fingerprint: true
                 }
             }
         }
@@ -428,7 +445,20 @@ EOF
             Папка с файлами задания: ${env.PROJECT_DIR}/
             """
             
-            // Финальная очистка в самом конце
+            // Архивируем все файлы проекта в самом конце, но перед очисткой
+            script {
+                try {
+                    // Архивируем весь проект Lesson30
+                    if (fileExists(env.PROJECT_DIR)) {
+                        archiveArtifacts artifacts: "${env.PROJECT_DIR}/**", fingerprint: true
+                        echo "✅ Весь проект заархивирован"
+                    }
+                } catch (Exception e) {
+                    echo "⚠ Ошибка архивации проекта: ${e.message}"
+                }
+            }
+            
+            // Финальная очистка в самом конце после архивации
             cleanWs(
                 cleanWhenAborted: true,
                 cleanWhenFailure: true,
