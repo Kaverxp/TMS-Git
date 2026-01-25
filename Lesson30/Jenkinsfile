@@ -350,17 +350,19 @@ EOF
                 echo "🧹 Очистка после выполнения..."
                 
                 script {
-                    sh '''
+                    // Создаем логи в корневой папке проекта
+                    sh """
                         echo "Сохранение логов..."
-                        mkdir -p logs
-                        docker logs tms-app-${ENVIRONMENT}-lesson30 2>/dev/null | tail -100 > logs/docker.log || echo "Логи Docker недоступны"
-                        date > logs/completion_time.txt
-                    '''
+                        mkdir -p \${WORKSPACE}/logs
+                        docker logs tms-app-${params.ENVIRONMENT}-lesson30 2>/dev/null | tail -100 > \${WORKSPACE}/logs/docker.log || echo "Логи Docker недоступны"
+                        date > \${WORKSPACE}/logs/completion_time.txt
+                        echo "Созданные логи:"
+                        ls -la \${WORKSPACE}/logs/
+                    """
                     
-                    // Архивируем логи перед удалением
-                    dir(env.PROJECT_DIR) {
-                        archiveArtifacts artifacts: 'logs/**', fingerprint: true
-                    }
+                    // Архивируем логи из корневой директории
+                    archiveArtifacts artifacts: 'logs/**', fingerprint: true
+                    echo "✅ Логи заархивированы"
                     
                     // Удаляем контейнеры только в dev/test окружениях
                     if (params.ENVIRONMENT in ['dev', 'test']) {
