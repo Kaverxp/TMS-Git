@@ -7,72 +7,39 @@ def call(Map config = [:]) {
     def port = config.port ?: 8080
     
     node {
-        stage('Build Docker Image') {
-            echo "🐳 Сборка Docker-образа: ${imageName}:${imageTag}"
+        stage('Build') {
+            echo "🐳 Сборка образа: ${imageName}:${imageTag}"
             
-            // ПРОСТЕЙШИЙ Dockerfile - гарантированно работает
-            sh '''
-                cat > Dockerfile << 'EOF'
+            sh """
+                cat > Dockerfile << EOF
 FROM nginx:alpine
-RUN echo "<h1>ТМС Приложение успешно развёрнуто!</h1><p>Jenkins Pipeline выполнен. Сборка: ''' + config.buildNumber + '''</p>" > /usr/share/nginx/html/index.html
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+RUN echo '<h1>Приложение развернуто</h1>' > /usr/share/nginx/html/index.html
 EOF
-            '''
-            
-            sh "docker build -t ${imageName}:${imageTag} ."
+                docker build -t ${imageName}:${imageTag} .
+            """
         }
         
-        stage('Deploy Container') {
-            echo "🚀 Развёртывание контейнера: ${containerName}"
+        stage('Deploy') {
+            echo "🚀 Запуск контейнера: ${containerName}"
             
-            // Останавливаем и удаляем старый контейнер
             sh """
                 docker stop ${containerName} 2>/dev/null || true
                 docker rm ${containerName} 2>/dev/null || true
+                docker run -d --name ${containerName} -p ${port}:80 ${imageName}:${imageTag}
             """
-            
-            // Запускаем новый контейнер
-            sh """
-                docker run -d \\
-                    --name ${containerName} \\
-                    -p ${port}:80 \\
-                    ${imageName}:${imageTag}
-            """
-            
-            echo "✅ Контейнер запущен на порту ${port}"
         }
         
-        stage('Health Check') {
-            echo "🏥 Проверка здоровья приложения..."
+        stage('Check') {
+            echo "🔍 Проверка развертывания"
             
-            retry(5) {
-                sleep 3
-                
-                // Проверка состояния контейнера
+            retry(3) {
+                sleep 2
                 sh """
-                    if docker inspect -f '{{.State.Status}}' ${containerName} | grep -q running; then
-                        echo "✅ Контейнер работает"
-                    else
-                        echo "❌ Контейнер не запущен"
-                        exit 1
-                    fi
-                """
-                
-                // HTTP-проверка
-                sh """
-                    if curl -s -f http://localhost:${port} > /dev/null; then
-                        echo "✅ HTTP-статус: 200 - Приложение доступно"
-                    else
-                        echo "⚠ Проблемы с HTTP доступностью"
-                        docker logs ${containerName} --tail 5
-                    fi
+                    docker inspect -f '{{.State.Status}}' ${containerName} | grep -q running
+                    echo "✅ Контейнер запущен"
+                    curl -s http://localhost:${port} && echo "✅ Приложение доступно"
                 """
             }
         }
     }
-    
-    echo "🎉 Деплой завершён успешно!"
 }
-
-return this

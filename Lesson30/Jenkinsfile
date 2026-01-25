@@ -2,107 +2,52 @@ pipeline {
     agent any
     
     parameters {
-        choice(
-            name: 'ENVIRONMENT',
-            choices: ['dev', 'test', 'prod'],
-            description: 'Целевое окружение для деплоя'
-        )
-        string(
-            name: 'IMAGE_TAG',
-            defaultValue: 'v1.0',
-            description: 'Тег Docker-образа'
-        )
-        booleanParam(
-            name: 'RUN_TESTS',
-            defaultValue: true,
-            description: 'Запускать тесты?'
-        )
-        booleanParam(
-            name: 'GENERATE_REPORT',
-            defaultValue: true,
-            description: 'Генерировать отчёт?'
-        )
-        choice(
-            name: 'REPORT_FORMAT',
-            choices: ['html', 'json', 'txt'],
-            description: 'Формат отчёта'
-        )
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'prod'], description: 'Окружение для деплоя')
+        string(name: 'IMAGE_TAG', defaultValue: 'v1.0', description: 'Тег Docker-образа')
+        booleanParam(name: 'RUN_TESTS', defaultValue: true, description: 'Запускать тесты?')
+        booleanParam(name: 'GENERATE_REPORT', defaultValue: true, description: 'Генерировать отчёт?')
     }
     
     environment {
         APP_NAME = 'tms-app'
-        BUILD_ID = "${BUILD_NUMBER}"
         PROJECT_DIR = 'Lesson30'
+        CONTAINER_NAME = "${APP_NAME}-${params.ENVIRONMENT}-lesson30"
     }
     
     options {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-        preserveStashes(buildCount: 5)
     }
     
     stages {
         stage('Initialize') {
             steps {
-                echo "🚀 Запуск Pipeline #${BUILD_NUMBER} для задания 30"
+                echo "🚀 Запуск Pipeline #${BUILD_NUMBER}"
                 echo "📁 Рабочая директория: ${env.WORKSPACE}"
-                echo "📁 Директория проекта: ${env.PROJECT_DIR}"
-                
-                sh """
-                    echo "Структура репозитория:"
-                    find . -maxdepth 2 -type f \\( -name "*.groovy" -o -name "*.py" -o -name "Jenkinsfile" \\) | sort
-                    echo ""
-                    echo "Содержимое папки \${PROJECT_DIR}:"
-                    ls -la \${PROJECT_DIR} 2>/dev/null || echo "Папка не найдена"
-                """
+                sh 'find . -maxdepth 2 -type f \\( -name "*.groovy" -o -name "*.py" -o -name "Jenkinsfile" \\) | sort'
             }
         }
         
         stage('Checkout') {
             steps {
                 echo "📦 Клонирование репозитория..."
-                git branch: 'master', 
-                    url: 'https://github.com/Kaverxp/TMS-Git.git',
-                    poll: false
-                
+                git url: 'https://github.com/Kaverxp/TMS-Git.git', branch: 'master'
                 dir(env.PROJECT_DIR) {
-                    sh '''
-                        echo "Содержимое папки Lesson30:"
-                        ls -la
-                        echo ""
-                        echo "Файлы задания:"
-                        find . -type f \\( -name "*.groovy" -o -name "*.py" \\) | sort
-                    '''
+                    sh 'ls -la && find . -type f \\( -name "*.groovy" -o -name "*.py" \\) | sort'
                 }
             }
         }
         
         stage('Build') {
-            when {
-                expression { params.ENVIRONMENT != 'prod' }
-            }
+            when { expression { params.ENVIRONMENT != 'prod' } }
             steps {
-                echo "🔨 Сборка приложения..."
-                
+                echo "🔨 Проверка файлов сборки..."
                 dir(env.PROJECT_DIR) {
                     script {
-                        try {
-                            if (fileExists('deploy.groovy')) {
-                                echo "✅ Найден deploy.groovy"
-                            } else {
-                                error "❌ Файл deploy.groovy не найден в ${env.PROJECT_DIR}"
+                        ['deploy.groovy', 'report_dsl.py'].each { file ->
+                            if (fileExists(file)) {
+                                echo "✅ Найден ${file}"
                             }
-                            
-                            if (fileExists('report_dsl.py')) {
-                                echo "✅ Найден report_dsl.py"
-                            } else {
-                                echo "⚠ Файл report_dsl.py не найден"
-                            }
-                            
-                        } catch (Exception e) {
-                            echo "❌ Ошибка проверки файлов: ${e.message}"
-                            error e.message
                         }
                     }
                 }
@@ -110,356 +55,122 @@ pipeline {
         }
         
         stage('Test') {
-            when {
-                allOf {
+            when { 
+                allOf { 
                     expression { params.RUN_TESTS == true }
                     expression { params.ENVIRONMENT != 'prod' }
-                }
+                } 
             }
             steps {
                 echo "🧪 Запуск тестов..."
-                
                 dir(env.PROJECT_DIR) {
-                    script {
-                        try {
-                            echo "Тестирование Groovy скрипта..."
-                            sh '''
-                                echo "Проверка синтаксиса Groovy:"
-                                if command -v groovy >/dev/null 2>&1; then
-                                    groovy -c deploy.groovy 2>/dev/null && echo "✅ Синтаксис Groovy корректен" || echo "⚠ Не удалось проверить синтаксис Groovy"
-                                else
-                                    echo "⚠ Groovy не установлен, проверка пропущена"
-                                fi
-                                
-                                echo "Проверка скрипта деплоя:"
-                                head -20 deploy.groovy | grep -q "def call" && echo "✅ Структура скрипта корректна" || echo "⚠ Нестандартная структура"
-                            '''
-                            
-                            echo "Тестирование Python DSL..."
-                            sh '''
-                                echo "Проверка Python скрипта:"
-                                if python3 -m py_compile report_dsl.py 2>/dev/null; then
-                                    echo "✅ Python синтаксис корректен"
-                                else
-                                    echo "⚠ Ошибка Python синтаксиса"
-                                fi
-                                
-                                echo "Проверка DSL интерфейса:"
-                                python3 report_dsl.py --help 2>&1 | head -5 || true
-                            '''
-                            
-                        } catch (Exception e) {
-                            echo "⚠ Тесты завершились с ошибкой: ${e.message}"
-                            currentBuild.result = 'UNSTABLE'
-                        }
-                    }
-                }
-            }
-            
-            post {
-                always {
-                    echo "📈 Результаты тестирования сохранены"
-                    junit(
-                        testResults: '**/test-reports/*.xml', 
-                        allowEmptyResults: true,
-                        skipPublishingChecks: true
-                    )
-                }
-            }
-        }
-        
-        stage('Generate Report') {
-            when {
-                allOf {
-                    expression { params.GENERATE_REPORT == true }
-                    expression { fileExists("${env.PROJECT_DIR}/report_dsl.py") }
-                }
-            }
-            steps {
-                echo "📊 Генерация отчёта с использованием DSL..."
-                
-                dir(env.PROJECT_DIR) {
-                    script {
-                        try {
-                            sh '''
-                                python3 --version || python --version || echo "Python не найден"
-                            '''
-                            
-                            sh 'mkdir -p generated_reports'
-                            
-                            sh """
-                                echo "Запуск DSL генератора отчётов..."
-                                python3 report_dsl.py \\
-                                    --type jenkins_pipeline \\
-                                    --period \$(date +%Y-%m) \\
-                                    --format ${params.REPORT_FORMAT} \\
-                                    --output-dir ./generated_reports \\
-                                    --filter environment=${params.ENVIRONMENT} \\
-                                    --filter pipeline=lesson30 \\
-                                    --filter build_number=${BUILD_NUMBER} \\
-                                    --filter image_tag=${params.IMAGE_TAG}
-                            """
-                            
-                        } catch (Exception e) {
-                            echo "⚠ Ошибка генерации отчёта: ${e.message}"
-                            
-                            sh """
-                                echo "Создаю простой отчёт..."
-                                mkdir -p generated_reports
-                                cat > generated_reports/error_report.txt << EOF
-Отчёт о выполнении задания 30
-============================
-Время: \$(date)
-Номер сборки: ${BUILD_NUMBER}
-Окружение: ${params.ENVIRONMENT}
-Статус: ERROR
-Ошибка при генерации отчёта: ${e.message}
-EOF
-                            """
-                            currentBuild.result = 'UNSTABLE'
-                        }
-                    }
-                }
-            }
-            
-            post {
-                always {
-                    dir(env.PROJECT_DIR) {
-                        archiveArtifacts artifacts: 'generated_reports/**', fingerprint: true
-                    }
-                }
-                success {
-                    echo "✅ Отчёт успешно сгенерирован"
-                    
-                    dir(env.PROJECT_DIR) {
-                        sh 'ls -la generated_reports/'
-                    }
-                    
-                    script {
-                        if (params.REPORT_FORMAT == 'html') {
-                            publishHTML(
-                                target: [
-                                    allowMissing: false,
-                                    alwaysLinkToLastBuild: true,
-                                    keepAll: true,
-                                    reportDir: "${env.PROJECT_DIR}/generated_reports",
-                                    reportFiles: '*.html',
-                                    reportName: 'Lesson 30 Report'
-                                ]
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        
-        stage('Execute Groovy Deployment') {
-            when {
-                expression { params.ENVIRONMENT in ['dev', 'test', 'prod'] }
-            }
-            steps {
-                echo "🚀 Выполнение Groovy скрипта деплоя..."
-                
-                dir(env.PROJECT_DIR) {
-                    script {
-                        try {
-                            def deployScript = load 'deploy.groovy'
-                            
-                            deployScript.call([
-                                imageName: env.APP_NAME,
-                                imageTag: params.IMAGE_TAG,
-                                containerName: "${env.APP_NAME}-${params.ENVIRONMENT}-lesson30",
-                                port: 9090,
-                                environment: params.ENVIRONMENT,
-                                buildNumber: BUILD_NUMBER,
-                                projectDir: env.PROJECT_DIR
-                            ])
-                            
-                        } catch (Exception e) {
-                            echo "❌ Критическая ошибка деплоя: ${e.message}"
-                            error "Деплой прерван: ${e.message}"
-                        }
-                    }
-                }
-            }
-            
-            post {
-                success {
-                    echo "✅ Деплой выполнен успешно"
-                }
-                failure {
-                    echo "❌ Ошибка деплоя"
                     sh '''
-                        echo "Попытка отката..."
-                        docker ps -a --filter "name=tms-app.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
-                        docker ps -a --filter "name=tms-app.*lesson30" -q | xargs -r docker rm 2>/dev/null || true
+                        echo "Проверка Groovy:"
+                        head -5 deploy.groovy | grep -q "def" && echo "✅ Структура корректна"
+                        
+                        echo "Проверка Python:"
+                        python3 -m py_compile report_dsl.py && echo "✅ Синтаксис корректен"
                     '''
                 }
             }
         }
         
-        stage('Verify Deployment') {
-            when {
-                expression { params.ENVIRONMENT in ['dev', 'test'] }
+        stage('Generate Report') {
+            when { 
+                allOf { 
+                    expression { params.GENERATE_REPORT == true }
+                    expression { fileExists("${env.PROJECT_DIR}/report_dsl.py") }
+                } 
             }
+            steps {
+                echo "📊 Генерация отчёта..."
+                dir(env.PROJECT_DIR) {
+                    sh '''
+                        mkdir -p generated_reports
+                        python3 report_dsl.py \
+                            --type jenkins_pipeline \
+                            --period $(date +%Y-%m) \
+                            --format html \
+                            --output-dir ./generated_reports \
+                            --filter environment=''' + "${params.ENVIRONMENT}" + ''' \
+                            --filter pipeline=lesson30 \
+                            --filter build_number=''' + "${BUILD_NUMBER}"
+                    '''
+                }
+            }
+            post {
+                success {
+                    dir(env.PROJECT_DIR) {
+                        archiveArtifacts artifacts: 'generated_reports/**'
+                        publishHTML(target: [
+                            reportDir: "generated_reports",
+                            reportFiles: '*.html',
+                            reportName: 'Lesson 30 Report'
+                        ])
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            when { expression { params.ENVIRONMENT in ['dev', 'test', 'prod'] } }
+            steps {
+                echo "🚀 Выполнение деплоя..."
+                dir(env.PROJECT_DIR) {
+                    script {
+                        def deploy = load 'deploy.groovy'
+                        deploy.call([
+                            imageName: env.APP_NAME,
+                            imageTag: params.IMAGE_TAG,
+                            containerName: env.CONTAINER_NAME,
+                            port: 9090,
+                            environment: params.ENVIRONMENT
+                        ])
+                    }
+                }
+            }
+        }
+        
+        stage('Verify') {
+            when { expression { params.ENVIRONMENT in ['dev', 'test'] } }
             steps {
                 echo "🔍 Проверка развёртывания..."
-                
-                script {
-                    retry(3) {
-                        sleep 3
-                        
-                        sh """
-                            echo "=== Проверка контейнеров задания 30 ==="
-                            echo "Активные контейнеры:"
-                            docker ps --filter "name=lesson30" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}" || true
-                            
-                            echo ""
-                            echo "Все контейнеры с меткой lesson30:"
-                            docker ps -a --filter "name=lesson30" --format "table {{.Names}}\\t{{.Status}}" || true
-                            
-                            echo ""
-                            echo "Использование диска:"
-                            du -sh \${WORKSPACE}/\${PROJECT_DIR} 2>/dev/null || echo "Не удалось проверить размер"
-                        """
-                    }
-                }
-            }
-        }
-        
-        stage('Archive Artifacts') {
-            steps {
-                echo "📦 Архивирование артефактов..."
-                
-                script {
-                    // Архивируем все файлы проекта Lesson30
-                    dir(env.PROJECT_DIR) {
-                        archiveArtifacts artifacts: '**', fingerprint: true
-                        echo "✅ Все файлы проекта заархивированы"
-                        
-                        // Отдельно архивируем ключевые файлы
-                        archiveArtifacts artifacts: '*.groovy,*.py,*.md,Jenkinsfile', fingerprint: true
-                        echo "✅ Ключевые файлы заархивированы"
-                    }
-                }
-            }
-        }
-        
-        stage('Cleanup') {
-            steps {
-                echo "🧹 Очистка после выполнения..."
-                
-                script {
-                    // Создаем логи в корневой папке проекта
+                retry(3) {
+                    sleep 3
                     sh """
-                        echo "Сохранение логов..."
-                        mkdir -p \${WORKSPACE}/logs
-                        docker logs tms-app-${params.ENVIRONMENT}-lesson30 2>/dev/null | tail -100 > \${WORKSPACE}/logs/docker.log || echo "Логи Docker недоступны"
-                        date > \${WORKSPACE}/logs/completion_time.txt
-                        echo "Созданные логи:"
-                        ls -la \${WORKSPACE}/logs/
+                        echo "Контейнеры:"
+                        docker ps --filter "name=${env.CONTAINER_NAME}" --format "table {{.Names}}\\t{{.Status}}"
+                        
+                        echo "Проверка доступности:"
+                        docker inspect -f '{{.State.Status}}' ${env.CONTAINER_NAME}
                     """
-                    
-                    // Архивируем логи из корневой директории
-                    archiveArtifacts artifacts: 'logs/**', fingerprint: true
-                    echo "✅ Логи заархивированы"
-                    
-                    // Удаляем контейнеры только в dev/test окружениях
-                    if (params.ENVIRONMENT in ['dev', 'test']) {
-                        sh '''
-                            echo "Очистка контейнеров задания 30..."
-                            docker ps -a --filter "name=.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
-                            docker ps -a --filter "name=.*lesson30" -q | xargs -r docker rm 2>/dev/null || true
-                            
-                            echo "Очистка образов задания 30..."
-                            docker images --filter "reference=*lesson30*" -q | xargs -r docker rmi 2>/dev/null || true
-                        '''
-                    } else {
-                        echo "⚠ В продакшене контейнеры не удаляются автоматически"
-                    }
                 }
             }
         }
     }
     
     post {
-        success {
-            echo """
-            🎉 ЗАДАНИЕ 30 ВЫПОЛНЕНО УСПЕШНО!
-            ===============================
-            Проект: ${env.APP_NAME}
-            Задание: Урок 30 - Jenkins Pipeline
-            Окружение: ${params.ENVIRONMENT}
-            Сборка: #${BUILD_NUMBER}
-            Длительность: ${currentBuild.durationString}
-            
-            Результаты:
-            ✅ Pipeline создан (декларативный синтаксис)
-            ✅ Groovy скрипт деплоя выполнен
-            ✅ DSL для генерации отчётов создан
-            ✅ Обработка ошибок реализована
-            
-            Ссылка на сборку: ${env.BUILD_URL}
-            """
-        }
-        
-        failure {
-            echo """
-            ❌ ВЫПОЛНЕНИЕ ЗАДАНИЯ 30 ПРЕРВАНО!
-            ==================================
-            Причина: ${currentBuild.result}
-            
-            Проверьте:
-            1. Наличие файлов в папке ${env.PROJECT_DIR}/
-            2. Доступность Docker
-            3. Логи сборки: ${env.BUILD_URL}console
-            
-            Для отладки выполните вручную:
-            cd ${env.WORKSPACE}/${env.PROJECT_DIR}
-            ls -la
-            """
-        }
-        
-        unstable {
-            echo """
-            ⚠ ЗАДАНИЕ 30 ВЫПОЛНЕНО С ПРЕДУПРЕЖДЕНИЯМИ
-            =========================================
-            Возможные причины:
-            - Тесты завершились с ошибками
-            - Проблемы с генерацией отчётов
-            - Предупреждения в скриптах
-            
-            Детали: ${env.BUILD_URL}testReport
-            """
-        }
-        
         always {
-            echo """
-            📋 ИТОГИ ВЫПОЛНЕНИЯ ЗАДАНИЯ 30
-            ==============================
-            Время: ${new Date().toString()}
-            Статус: ${currentBuild.result}
-            Длительность: ${currentBuild.durationString}
-            Рабочая директория: ${env.WORKSPACE}
+            echo "📋 ИТОГИ: ${currentBuild.result}"
+            echo "Сборка: #${BUILD_NUMBER}"
+            echo "Окружение: ${params.ENVIRONMENT}"
+            echo "Длительность: ${currentBuild.durationString}"
             
-            Созданные артефакты:
-            - Jenkins Pipeline
-            - Groovy скрипт деплоя
-            - DSL для генерации отчётов
-            - Документация
-            
-            Папка с файлами задания: ${env.PROJECT_DIR}/
-            """
-            
-            // Финальная очистка в самом конце
-            cleanWs(
-                cleanWhenAborted: true,
-                cleanWhenFailure: true,
-                cleanWhenNotBuilt: true,
-                cleanWhenSuccess: true,
-                cleanWhenUnstable: true,
-                deleteDirs: true
-            )
+            // Очистка для dev/test окружений
+            script {
+                if (params.ENVIRONMENT in ['dev', 'test']) {
+                    sh '''
+                        docker ps -a --filter "name=.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
+                        docker ps -a --filter "name=.*lesson30" -q | xargs -r docker rm 2>/dev/null || true
+                    '''
+                }
+            }
+        }
+        success {
+            echo "🎉 УСПЕШНО!"
+        }
+        failure {
+            echo "❌ ОШИБКА!"
         }
     }
 }
