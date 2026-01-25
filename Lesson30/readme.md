@@ -14,24 +14,36 @@ Docker: Docker Desktop для Windows
 Версия Python: 3.13.5
 
 ### Структура
--Jenkinsfile - основной Pipeline
--deploy.groovy - скрипт для Docker деплоя
--report_dsl.py - генератор отчетов
+Jenkinsfile - основной Pipeline
+
+deploy.groovy - скрипт для Docker деплоя
+
+report_dsl.py - генератор отчетов
 
 ### Этапы Pipeline
--Initialize - инициализация
--Checkout - клонирование репозитория
+Initialize - инициализация
+
+Checkout - клонирование репозитория
+
 Build - проверка файлов
+
 Test - запуск тестов
+
 Report - генерация отчетов
+
 Deploy - деплой Docker
+
 Verify - проверка развертывания
 
 ### Технологии
 Jenkins в Docker контейнере
+
 Groovy для Pipeline
+
 Docker Desktop для Windows
+
 Python для отчетов
+
 Nginx в контейнере
 
 Docker на Windows
@@ -45,24 +57,36 @@ RUN echo 'Hello from Jenkins Pipeline on Windows' > /usr/share/nginx/html/index.
 
 ### Особенности Windows
 Jenkins запущен в Docker контейнере
+
 Docker Desktop управляет контейнерами через WSL2
+
 Порт 9090 используется для избежания конфликтов с Jenkins (8080)
+
 Все команды выполняются внутри Docker контейнеров
 
 ## Запуск
 Запустить Docker Desktop на Windows
+
 Создать Pipeline Job в Jenkins
+
 Указать репозиторий: https://github.com/Kaverxp/TMS-Git.git
+
 Указать путь: Lesson30/Jenkinsfile
+
 Запустить сборку
 
 ## Результат
 При успешном выполнении:
+
 Docker контейнер запущен на порту 9090
+
 Отчеты сгенерированы в формате JSON
+
 Артефакты заархивированы в Jenkins
 
 ## Проблемы и решения на Windows
 Порт 8080 занят Jenkins - используем порт 9090
+
 Сетевые настройки Docker - контейнеры доступны через localhost
+
 Интеграция WSL2 и Docker - автоматическая настройка через Docker Desktop
