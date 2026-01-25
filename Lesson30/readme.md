@@ -4,9 +4,13 @@
 
 ## Окружение
 ОС: Windows с Docker Desktop
+
 Jenkins: Развернут в Docker контейнере
+
 Docker: Docker Desktop для Windows
+
 Версия Docker: 29.1.3
+
 Версия Python: 3.13.5
 
 ### Структура
