@@ -62,12 +62,9 @@ pipeline {
         stage('Checkout') {
             steps {
                 echo "📦 Клонирование репозитория..."
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/master']],
-                    extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: '.']],
-                    userRemoteConfigs: [[url: 'https://github.com/Kaverxp/TMS-Git.git']]
-                ])
+                git branch: 'master', 
+                    url: 'https://github.com/Kaverxp/TMS-Git.git',
+                    poll: false
                 
                 dir(env.PROJECT_DIR) {
                     sh '''
@@ -231,6 +228,28 @@ EOF
                         archiveArtifacts artifacts: 'generated_reports/**', fingerprint: true
                     }
                 }
+                success {
+                    echo "✅ Отчёт успешно сгенерирован"
+                    
+                    dir(env.PROJECT_DIR) {
+                        sh 'ls -la generated_reports/'
+                    }
+                    
+                    script {
+                        if (params.REPORT_FORMAT == 'html') {
+                            publishHTML(
+                                target: [
+                                    allowMissing: false,
+                                    alwaysLinkToLastBuild: true,
+                                    keepAll: true,
+                                    reportDir: "${env.PROJECT_DIR}/generated_reports",
+                                    reportFiles: '*.html',
+                                    reportName: 'Lesson 30 Report'
+                                ]
+                            )
+                        }
+                    }
+                }
             }
         }
         
@@ -308,6 +327,24 @@ EOF
             }
         }
         
+        stage('Archive Artifacts') {
+            steps {
+                echo "📦 Архивирование артефактов..."
+                
+                script {
+                    // Архивируем все файлы проекта Lesson30
+                    dir(env.PROJECT_DIR) {
+                        archiveArtifacts artifacts: '**', fingerprint: true
+                        echo "✅ Все файлы проекта заархивированы"
+                        
+                        // Отдельно архивируем ключевые файлы
+                        archiveArtifacts artifacts: '*.groovy,*.py,*.md,Jenkinsfile', fingerprint: true
+                        echo "✅ Ключевые файлы заархивированы"
+                    }
+                }
+            }
+        }
+        
         stage('Cleanup') {
             steps {
                 echo "🧹 Очистка после выполнения..."
@@ -319,30 +356,24 @@ EOF
                         docker logs tms-app-${ENVIRONMENT}-lesson30 2>/dev/null | tail -100 > logs/docker.log || echo "Логи Docker недоступны"
                         date > logs/completion_time.txt
                     '''
-                }
-            }
-            
-            post {
-                always {
-                    script {
-                        // Архивируем логи перед удалением контейнеров
-                        dir(env.PROJECT_DIR) {
-                            archiveArtifacts artifacts: 'logs/**', fingerprint: true
-                        }
-                        
-                        // Удаляем контейнеры только в dev/test окружениях
-                        if (params.ENVIRONMENT in ['dev', 'test']) {
-                            sh '''
-                                echo "Очистка контейнеров задания 30..."
-                                docker ps -a --filter "name=.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
-                                docker ps -a --filter "name=.*lesson30" -q | xargs -r docker rm 2>/dev/null || true
-                                
-                                echo "Очистка образов задания 30..."
-                                docker images --filter "reference=*lesson30*" -q | xargs -r docker rmi 2>/dev/null || true
-                            '''
-                        } else {
-                            echo "⚠ В продакшене контейнеры не удаляются автоматически"
-                        }
+                    
+                    // Архивируем логи перед удалением
+                    dir(env.PROJECT_DIR) {
+                        archiveArtifacts artifacts: 'logs/**', fingerprint: true
+                    }
+                    
+                    // Удаляем контейнеры только в dev/test окружениях
+                    if (params.ENVIRONMENT in ['dev', 'test']) {
+                        sh '''
+                            echo "Очистка контейнеров задания 30..."
+                            docker ps -a --filter "name=.*lesson30" -q | xargs -r docker stop 2>/dev/null || true
+                            docker ps -a --filter "name=.*lesson30" -q | xargs -r docker rm 2>/dev/null || true
+                            
+                            echo "Очистка образов задания 30..."
+                            docker images --filter "reference=*lesson30*" -q | xargs -r docker rmi 2>/dev/null || true
+                        '''
+                    } else {
+                        echo "⚠ В продакшене контейнеры не удаляются автоматически"
                     }
                 }
             }
@@ -368,33 +399,6 @@ EOF
             
             Ссылка на сборку: ${env.BUILD_URL}
             """
-            
-            // Архивируем основные файлы задания
-            script {
-                try {
-                    dir(env.PROJECT_DIR) {
-                        // Архивируем исходные файлы
-                        archiveArtifacts artifacts: '*.groovy,*.py,*.md,Jenkinsfile', fingerprint: true
-                        
-                        // Публикуем HTML отчёт если есть
-                        if (params.REPORT_FORMAT == 'html' && fileExists('generated_reports')) {
-                            publishHTML(
-                                target: [
-                                    allowMissing: true,
-                                    alwaysLinkToLastBuild: true,
-                                    keepAll: true,
-                                    reportDir: 'generated_reports',
-                                    reportFiles: '*.html',
-                                    reportName: 'Lesson 30 Report'
-                                ]
-                            )
-                        }
-                    }
-                    echo "✅ Артефакты задания заархивированы"
-                } catch (Exception e) {
-                    echo "⚠ Не удалось заархивировать все артефакты: ${e.message}"
-                }
-            }
         }
         
         failure {
@@ -445,20 +449,7 @@ EOF
             Папка с файлами задания: ${env.PROJECT_DIR}/
             """
             
-            // Архивируем все файлы проекта в самом конце, но перед очисткой
-            script {
-                try {
-                    // Архивируем весь проект Lesson30
-                    if (fileExists(env.PROJECT_DIR)) {
-                        archiveArtifacts artifacts: "${env.PROJECT_DIR}/**", fingerprint: true
-                        echo "✅ Весь проект заархивирован"
-                    }
-                } catch (Exception e) {
-                    echo "⚠ Ошибка архивации проекта: ${e.message}"
-                }
-            }
-            
-            // Финальная очистка в самом конце после архивации
+            // Финальная очистка в самом конце
             cleanWs(
                 cleanWhenAborted: true,
                 cleanWhenFailure: true,
