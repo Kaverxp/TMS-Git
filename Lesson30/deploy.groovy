@@ -10,40 +10,15 @@ def call(Map config = [:]) {
         stage('Build Docker Image') {
             echo "🐳 Сборка Docker-образа: ${imageName}:${imageTag}"
             
-            // Создаём Dockerfile с правильным синтаксисом
-            sh """
+            // ПРОСТЕЙШИЙ Dockerfile - гарантированно работает
+            sh '''
                 cat > Dockerfile << 'EOF'
 FROM nginx:alpine
-RUN echo '<!DOCTYPE html>
-<html>
-<head><title>ТМС Приложение</title>
-<style>
-body { font-family: Arial; margin: 40px; }
-.header { background: #4CAF50; color: white; padding: 20px; }
-.content { padding: 20px; }
-</style>
-</head>
-<body>
-<div class="header">
-<h1>🚀 ТМС Приложение развёрнуто!</h1>
-<p>Pipeline успешно выполнен</p>
-</div>
-<div class="content">
-<h2>Информация о деплое:</h2>
-<ul>
-<li>Окружение: ${config.environment ?: 'dev'}</li>
-<li>Версия: ${config.imageTag ?: 'latest'}</li>
-<li>Сборка: ${config.buildNumber ?: 'N/A'}</li>
-<li>Время: \$(date)</li>
-</ul>
-<p>Статус: <span style="color: green; font-weight: bold;">✅ Работает</span></p>
-</div>
-</body>
-</html>' > /usr/share/nginx/html/index.html
+RUN echo "<h1>ТМС Приложение успешно развёрнуто!</h1><p>Jenkins Pipeline выполнен. Сборка: ''' + config.buildNumber + '''</p>" > /usr/share/nginx/html/index.html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
 EOF
-            """
+            '''
             
             sh "docker build -t ${imageName}:${imageTag} ."
         }
@@ -75,25 +50,21 @@ EOF
                 sleep 3
                 
                 // Проверка состояния контейнера
-                def containerStatus = sh(
-                    script: "docker inspect -f '{{.State.Status}}' ${containerName} 2>/dev/null || echo 'not-found'",
-                    returnStdout: true
-                ).trim()
-                
-                if (containerStatus != 'running') {
-                    error "❌ Контейнер не запущен (статус: ${containerStatus})"
-                }
-                
-                echo "✅ Контейнер работает (статус: ${containerStatus})"
-                
-                // HTTP-проверка с таймаутом
                 sh """
-                    echo "Проверка HTTP доступности..."
-                    if timeout 10 curl -s -f http://localhost:${port} > /dev/null; then
+                    if docker inspect -f '{{.State.Status}}' ${containerName} | grep -q running; then
+                        echo "✅ Контейнер работает"
+                    else
+                        echo "❌ Контейнер не запущен"
+                        exit 1
+                    fi
+                """
+                
+                // HTTP-проверка
+                sh """
+                    if curl -s -f http://localhost:${port} > /dev/null; then
                         echo "✅ HTTP-статус: 200 - Приложение доступно"
                     else
-                        echo "⚠ Проблемы с HTTP доступностью, но контейнер работает"
-                        echo "Логи контейнера:"
+                        echo "⚠ Проблемы с HTTP доступностью"
                         docker logs ${containerName} --tail 5
                     fi
                 """
