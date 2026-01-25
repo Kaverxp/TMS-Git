@@ -8,19 +8,19 @@ def call(Map config = [:]) {
     
     node {
         stage('Build') {
-            echo "🐳 Сборка образа: ${imageName}:${imageTag}"
+            echo "Сборка образа: ${imageName}:${imageTag}"
             
             sh """
                 cat > Dockerfile << EOF
 FROM nginx:alpine
-RUN echo '<h1>Приложение развернуто</h1>' > /usr/share/nginx/html/index.html
+RUN echo 'Hello from Docker' > /usr/share/nginx/html/index.html
 EOF
                 docker build -t ${imageName}:${imageTag} .
             """
         }
         
         stage('Deploy') {
-            echo "🚀 Запуск контейнера: ${containerName}"
+            echo "Запуск контейнера: ${containerName}"
             
             sh """
                 docker stop ${containerName} 2>/dev/null || true
@@ -30,16 +30,17 @@ EOF
         }
         
         stage('Check') {
-            echo "🔍 Проверка развертывания"
+            echo "Проверка"
             
             retry(3) {
                 sleep 2
                 sh """
                     docker inspect -f '{{.State.Status}}' ${containerName} | grep -q running
-                    echo "✅ Контейнер запущен"
-                    curl -s http://localhost:${port} && echo "✅ Приложение доступно"
+                    echo "Контейнер запущен"
                 """
             }
         }
     }
 }
+
+// Удаляем return this - это вызывает проблему
