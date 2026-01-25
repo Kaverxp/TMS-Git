@@ -14,13 +14,13 @@ Docker: Docker Desktop для Windows
 Версия Python: 3.13.5
 
 ### Структура
-Jenkinsfile - основной Pipeline
-deploy.groovy - скрипт для Docker деплоя
-report_dsl.py - генератор отчетов
+-Jenkinsfile - основной Pipeline
+-deploy.groovy - скрипт для Docker деплоя
+-report_dsl.py - генератор отчетов
 
 ### Этапы Pipeline
-Initialize - инициализация
-Checkout - клонирование репозитория
+-Initialize - инициализация
+-Checkout - клонирование репозитория
 Build - проверка файлов
 Test - запуск тестов
 Report - генерация отчетов
