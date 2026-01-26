@@ -7,7 +7,7 @@ pipeline {
         string(name: 'CONTAINER_NAME', defaultValue: 'tms-app-dev', description: 'Container name')
         string(name: 'HOST_PORT', defaultValue: '9090', description: 'Host port')
         choice(name: 'ENVIRONMENT', choices: ['dev', 'test', 'prod'], description: 'Environment')
-        booleanParam(name: 'SKIP_DOCKER', defaultValue: true, description: 'Skip real Docker operations')
+        booleanParam(name: 'SKIP_DOCKER', defaultValue: false, description: 'Skip real Docker operations')
         booleanParam(name: 'CLEAN_PREVIOUS', defaultValue: true, description: 'Clean previous containers')
     }
     
@@ -114,6 +114,7 @@ EOF
                 script {
                     echo "🔍 Checking Docker availability..."
                     
+                    // Исправленная проверка Docker
                     sh '''
                         if docker --version > /dev/null 2>&1; then
                             echo "✅ Docker is available"
@@ -124,10 +125,10 @@ EOF
                         fi
                     '''
                     
-                    // Читаем значение и устанавливаем в переменную окружения
+                    // Правильное чтение статуса Docker
                     script {
                         def docker_status = sh(
-                            script: 'cat docker_status.txt 2>/dev/null || echo "false"',
+                            script: 'cat docker_status.txt',
                             returnStdout: true
                         ).trim()
                         
@@ -152,8 +153,11 @@ EOF
                         whoami
                         
                         echo ""
-                        echo "=== Docker Group ==="
-                        groups $(whoami) 2>/dev/null || echo "Cannot check groups"
+                        echo "=== Docker Socket ==="
+                        ls -la /var/run/docker.sock 2>/dev/null || echo "Docker socket not found"
+                        echo ""
+                        echo "=== User Groups ==="
+                        groups
                     '''
                 }
             }
@@ -255,13 +259,20 @@ EOF
                         // Создаем директории если их нет
                         sh 'mkdir -p build/libs reports'
                         
-                        // Записываем данные в переменные для удобства
-                        def build_mode = params.SKIP_DOCKER ? 'simulated' : 'real'
+                        // Определяем режим работы
+                        def build_mode = "unknown"
+                        if (params.SKIP_DOCKER == true) {
+                            build_mode = "simulated"
+                        } else if (env.DOCKER_AVAILABLE == 'true') {
+                            build_mode = "real_docker"
+                        } else {
+                            build_mode = "simulated_no_docker"
+                        }
                         
-                        // Создаем JSON отчет с помощью writeFile
-                        writeFile(
-                            file: 'Lesson30/reports/build_summary.json',
-                            text: """{
+                        // Создаем JSON отчет
+                        sh """
+                            cat > reports/build_summary.json << 'EOF'
+{
   "homework": 30,
   "status": "success",
   "build_number": "${BUILD_NUMBER}",
@@ -271,7 +282,9 @@ EOF
     "image": "${params.IMAGE_NAME}:${params.IMAGE_TAG}",
     "container": "${params.CONTAINER_NAME}",
     "port": "${params.HOST_PORT}",
-    "environment": "${params.ENVIRONMENT}"
+    "environment": "${params.ENVIRONMENT}",
+    "skip_docker": "${params.SKIP_DOCKER}",
+    "clean_previous": "${params.CLEAN_PREVIOUS}"
   },
   "requirements_met": [
     "declarative_pipeline",
@@ -291,66 +304,84 @@ EOF
     "build/libs/app.jar",
     "build/application.properties",
     "reports/build_summary.json",
-    "reports/simulation_complete.txt"
-  ]
-}"""
-                        )
+    "reports/simulation_complete.txt",
+    "reports/README.md"
+  ],
+  "timestamp": "$(date -Iseconds)"
+}
+EOF
+                        """
                         
-                        // Создаем README
-                        writeFile(
-                            file: 'Lesson30/reports/README.md',
-                            text: """# Homework #30 - Execution Report
+                        // Создаем README файл
+                        sh """
+                            cat > reports/README.md << 'EOF'
+# Homework #30 - Jenkins Pipeline Report
 
-## Summary
+## Build Information
+- **Build Number:** ${BUILD_NUMBER}
 - **Status:** SUCCESS
-- **Build:** ${BUILD_NUMBER}
-- **Mode:** ${params.SKIP_DOCKER ? 'Simulated' : 'Real Docker'}
+- **Timestamp:** $(date)
+- **Pipeline Mode:** ${build_mode}
 - **Docker Available:** ${env.DOCKER_AVAILABLE}
-- **Timestamp:** ${new Date().format('yyyy-MM-dd HH:mm:ss')}
 
-## Requirements Checklist
-✅ 1. Declarative Pipeline  
-✅ 2. Agent definition  
-✅ 3. Multiple stages  
-✅ 4. Steps with plugins/commands  
-✅ 5. Conditional execution  
-✅ 6. Parameters  
-✅ 7. Error handling  
-✅ 8. Pipeline validation  
-✅ 9. Documentation  
-✅ 10. Groovy script  
-✅ 11. Additional features  
-✅ 12. DSL for reports  
+## Parameters
+- **Image:** ${params.IMAGE_NAME}:${params.IMAGE_TAG}
+- **Container:** ${params.CONTAINER_NAME}
+- **Port:** ${params.HOST_PORT}:${env.APP_PORT}
+- **Environment:** ${params.ENVIRONMENT}
+- **Skip Docker:** ${params.SKIP_DOCKER}
+- **Clean Previous:** ${params.CLEAN_PREVIOUS}
 
 ## Pipeline Stages
-1. Initialize - Completed
-2. Checkout - Completed  
-3. Validate - Completed
-4. Build - Completed
-5. Docker Check - Completed
-6. Docker Setup Check - Completed
-7. Docker/Simulated Operations - Completed
-8. Generate Reports - Completed
-9. Final Verification - Completed
+1. ✅ Initialize
+2. ✅ Checkout SCM
+3. ✅ Validate Project Structure
+4. ✅ Build Application
+5. ✅ Check Docker Availability
+6. ✅ Check Docker Setup
+7. ✅ ${build_mode == 'real_docker' ? 'Docker Operations' : 'Simulated Operations'}
+8. ✅ Generate Reports
+9. ✅ Final Verification
 
-## Generated Artifacts
+## Requirements Implementation
+✅ 1. Declarative Pipeline with agent any  
+✅ 2. Multiple stages with clear purposes  
+✅ 3. Parameters for customization  
+✅ 4. Conditional execution (when conditions)  
+✅ 5. Error handling in post section  
+✅ 6. Pipeline validation and structure checks  
+✅ 7. Documentation within pipeline  
+✅ 8. Groovy script blocks for complex logic  
+✅ 9. Additional features (timeout, artifacts, etc.)  
+✅ 10. DSL for reports (Python script integration)  
+✅ 11. Docker integration (real or simulated)  
+✅ 12. Comprehensive post-build actions
+
+## Artifacts Generated
 - Application JAR file
 - Configuration properties
-- JSON report
-- Simulation report
-- This documentation
+- JSON build summary
+- Simulation report (if applicable)
+- This README file
 
-## Technical Details
-- Jenkins running on: Docker on Ubuntu 24.04
-- Pipeline type: Declarative
-- Total stages: 9
-- Execution time: Varies by environment"""
-                        )
+## Environment
+- Jenkins: Running in Docker
+- OS: Ubuntu 24.04
+- Docker: ${env.DOCKER_AVAILABLE == 'true' ? 'Available' : 'Not Available'}
+- Pipeline Type: Declarative
+EOF
+                        """
                         
-                        // Генерируем DSL отчет через Python скрипт
+                        // Проверяем Python перед выполнением DSL
                         sh '''
-                            echo "Generating DSL report..."
-                            python3 report_dsl.py --build-number ${BUILD_NUMBER} --env ${ENVIRONMENT} --output-dir ./reports 2>/dev/null || echo "DSL report skipped - Python not available"
+                            echo "Checking Python availability..."
+                            if python3 --version > /dev/null 2>&1; then
+                                echo "Python is available, generating DSL report..."
+                                python3 report_dsl.py --build-number ${BUILD_NUMBER} --env ${ENVIRONMENT} --output-dir ./reports
+                            else
+                                echo "Python not available, skipping DSL report"
+                                echo '{"status": "python_not_available", "message": "Python 3 not installed"}' > reports/dsl_report.json
+                            fi
                         '''
                         
                         echo "✅ Reports generated successfully"
@@ -380,9 +411,13 @@ EOF
                         sh '''
                             echo ""
                             echo "=== Generated Files Check ==="
-                            ls -la build/ reports/ 2>/dev/null || echo "No build/reports directories"
+                            echo "Reports directory:"
+                            ls -la reports/ 2>/dev/null || echo "No reports directory"
                             echo ""
-                            echo "File count:"
+                            echo "Build directory:"
+                            ls -la build/ 2>/dev/null || echo "No build directory"
+                            echo ""
+                            echo "Total files generated:"
                             find build/ reports/ -type f 2>/dev/null | wc -l || echo "0"
                         '''
                     }
@@ -407,9 +442,13 @@ EOF
                 sh '''
                     echo "=== Artifacts Summary ==="
                     echo "Build artifacts:"
-                    find build/ -type f 2>/dev/null | wc -l || echo "0"
+                    ls -la build/ 2>/dev/null || echo "No build artifacts"
+                    echo ""
                     echo "Report files:"
-                    find reports/ -type f 2>/dev/null | wc -l || echo "0"
+                    ls -la reports/ 2>/dev/null || echo "No report files"
+                    echo ""
+                    echo "Total files archived:"
+                    find build/ reports/ -type f 2>/dev/null | wc -l || echo "0"
                     echo "Archive ready for download"
                 '''
             }
@@ -421,7 +460,7 @@ EOF
             echo "📊 Final Status:"
             echo "   Build: ${BUILD_NUMBER}"
             echo "   Stages completed: 9/9"
-            echo "   Mode: ${params.SKIP_DOCKER ? 'Simulated' : 'Real Docker'}"
+            echo "   Mode: ${params.SKIP_DOCKER ? 'Simulated' : (env.DOCKER_AVAILABLE == 'true' ? 'Real Docker' : 'Simulated (no Docker)')}"
             echo "   Docker available: ${env.DOCKER_AVAILABLE}"
             echo "   Environment: ${params.ENVIRONMENT}"
             echo ""
@@ -436,6 +475,7 @@ EOF
                     echo "Timestamp: $(date)" >> reports/SUCCESS.txt
                     echo "Status: SUCCESS" >> reports/SUCCESS.txt
                     echo "Mode: ${SKIP_DOCKER}" >> reports/SUCCESS.txt
+                    echo "Docker Available: ${DOCKER_AVAILABLE}" >> reports/SUCCESS.txt
                 '''
             }
         }
