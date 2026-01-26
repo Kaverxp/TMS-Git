@@ -269,7 +269,7 @@ EOF
                             build_mode = "simulated_no_docker"
                         }
                         
-                        // Создаем JSON отчет
+                        // Создаем JSON отчет - используем двойные кавычки и экранирование
                         sh """
                             cat > reports/build_summary.json << 'EOF'
 {
@@ -307,7 +307,7 @@ EOF
     "reports/simulation_complete.txt",
     "reports/README.md"
   ],
-  "timestamp": "$(date -Iseconds)"
+  "timestamp": "\$(date -Iseconds)"
 }
 EOF
                         """
@@ -320,7 +320,7 @@ EOF
 ## Build Information
 - **Build Number:** ${BUILD_NUMBER}
 - **Status:** SUCCESS
-- **Timestamp:** $(date)
+- **Timestamp:** \$(date)
 - **Pipeline Mode:** ${build_mode}
 - **Docker Available:** ${env.DOCKER_AVAILABLE}
 
