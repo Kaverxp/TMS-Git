@@ -63,9 +63,16 @@ pipeline {
                             ls -la
                             echo ""
                             echo "=== Key Files ==="
-                            head -2 Jenkinsfile | xargs echo "Jenkinsfile:"
-                            head -2 Dockerfile | xargs echo "Dockerfile:"
-                            head -2 report_dsl.py | xargs echo "report_dsl.py:"
+                            echo "Jenkinsfile: $(head -1 Jenkinsfile)"
+                            echo "Dockerfile: $(head -1 Dockerfile)"
+                            echo "report_dsl.py: $(head -1 report_dsl.py)"
+                            
+                            echo ""
+                            echo "=== File Check ==="
+                            [ -f "Jenkinsfile" ] && echo "✅ Jenkinsfile exists" || echo "❌ Jenkinsfile missing"
+                            [ -f "Dockerfile" ] && echo "✅ Dockerfile exists" || echo "❌ Dockerfile missing"
+                            [ -f "report_dsl.py" ] && echo "✅ report_dsl.py exists" || echo "❌ report_dsl.py missing"
+                            [ -d "html" ] && echo "✅ html directory exists" || echo "❌ html directory missing"
                         '''
                     }
                 }
@@ -86,7 +93,7 @@ pipeline {
                             echo "TMS Application - Homework #30" > build/libs/app.jar
                             
                             # Create configuration
-                            cat > build/application.properties << 'EOF'
+                            cat > build/application.properties << EOF
 application.name=TMS-Homework-30
 application.version=1.0.${BUILD_NUMBER}
 build.timestamp=$(date)
@@ -94,6 +101,8 @@ pipeline.status=IN_PROGRESS
 EOF
                             
                             echo "✅ Build artifacts created"
+                            echo "Artifacts:"
+                            ls -la build/ build/libs/ 2>/dev/null || echo "No artifacts yet"
                         '''
                     }
                 }
@@ -118,7 +127,7 @@ EOF
                     // Читаем значение и устанавливаем в переменную окружения
                     script {
                         def docker_status = sh(
-                            script: 'cat docker_status.txt',
+                            script: 'cat docker_status.txt 2>/dev/null || echo "false"',
                             returnStdout: true
                         ).trim()
                         
@@ -144,7 +153,7 @@ EOF
                         
                         echo ""
                         echo "=== Docker Group ==="
-                        groups
+                        groups $(whoami) 2>/dev/null || echo "Cannot check groups"
                     '''
                 }
             }
@@ -182,9 +191,9 @@ EOF
                         // Deploy new container
                         sh """
                             echo "Deploying container..."
-                            docker run -d \
-                                --name ${params.CONTAINER_NAME} \
-                                -p ${params.HOST_PORT}:${APP_PORT} \
+                            docker run -d \\
+                                --name ${params.CONTAINER_NAME} \\
+                                -p ${params.HOST_PORT}:${env.APP_PORT} \\
                                 ${params.IMAGE_NAME}:${params.IMAGE_TAG}
                             echo "✅ Container deployed on port ${params.HOST_PORT}"
                         """
@@ -217,7 +226,6 @@ EOF
                         echo "Mode: Docker not available, using simulation"
                     }
                     
-                    // Используем простые строки без сложных подстановок
                     sh '''
                         echo "=== Simulation Results ==="
                         echo "1. Docker image build... [SIMULATED SUCCESS]"
@@ -244,12 +252,15 @@ EOF
                     script {
                         echo "📊 Generating final reports..."
                         
+                        // Создаем директории если их нет
+                        sh 'mkdir -p build/libs reports'
+                        
                         // Записываем данные в переменные для удобства
                         def build_mode = params.SKIP_DOCKER ? 'simulated' : 'real'
                         
                         // Создаем JSON отчет с помощью writeFile
                         writeFile(
-                            file: 'reports/build_summary.json',
+                            file: 'Lesson30/reports/build_summary.json',
                             text: """{
   "homework": 30,
   "status": "success",
@@ -287,7 +298,7 @@ EOF
                         
                         // Создаем README
                         writeFile(
-                            file: 'reports/README.md',
+                            file: 'Lesson30/reports/README.md',
                             text: """# Homework #30 - Execution Report
 
 ## Summary
@@ -320,6 +331,7 @@ EOF
 6. Docker Setup Check - Completed
 7. Docker/Simulated Operations - Completed
 8. Generate Reports - Completed
+9. Final Verification - Completed
 
 ## Generated Artifacts
 - Application JAR file
@@ -331,7 +343,7 @@ EOF
 ## Technical Details
 - Jenkins running on: Docker on Ubuntu 24.04
 - Pipeline type: Declarative
-- Total stages: 8
+- Total stages: 9
 - Execution time: Varies by environment"""
                         )
                         
@@ -384,9 +396,12 @@ EOF
             echo "📋 Pipeline execution completed"
             
             dir('Lesson30') {
+                // Создаем директории если их нет
+                sh 'mkdir -p build/libs reports 2>/dev/null || true'
+                
                 // Архивируем артефакты
-                archiveArtifacts artifacts: 'build/**', fingerprint: true
-                archiveArtifacts artifacts: 'reports/**', fingerprint: true
+                archiveArtifacts artifacts: 'build/**', fingerprint: true, allowEmptyArchive: true
+                archiveArtifacts artifacts: 'reports/**', fingerprint: true, allowEmptyArchive: true
                 
                 // Показываем сводку
                 sh '''
@@ -415,6 +430,7 @@ EOF
             // Создаем маркер успеха
             dir('Lesson30') {
                 sh '''
+                    mkdir -p reports
                     echo "HOMEWORK #30 - COMPLETED SUCCESSFULLY" > reports/SUCCESS.txt
                     echo "Build: ${BUILD_NUMBER}" >> reports/SUCCESS.txt
                     echo "Timestamp: $(date)" >> reports/SUCCESS.txt
@@ -430,10 +446,11 @@ EOF
             // Сохраняем информацию об ошибке
             dir('Lesson30') {
                 sh '''
-                    echo "HOMEWORK #30 - FAILED" > reports/FAILURE.txt
-                    echo "Build: ${BUILD_NUMBER}" >> reports/FAILURE.txt
-                    echo "Timestamp: $(date)" >> reports/FAILURE.txt
-                    echo "Status: FAILED" >> reports/FAILURE.txt
+                    mkdir -p reports 2>/dev/null || true
+                    echo "HOMEWORK #30 - FAILED" > reports/FAILURE.txt 2>/dev/null || echo "Cannot create failure report"
+                    echo "Build: ${BUILD_NUMBER}" >> reports/FAILURE.txt 2>/dev/null || true
+                    echo "Timestamp: $(date)" >> reports/FAILURE.txt 2>/dev/null || true
+                    echo "Status: FAILED" >> reports/FAILURE.txt 2>/dev/null || true
                 '''
             }
         }
