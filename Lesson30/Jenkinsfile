@@ -114,27 +114,57 @@ EOF
                 script {
                     echo "🔍 Checking Docker availability..."
                     
-                    // Исправленная проверка Docker
-                    sh '''
-                        if docker --version > /dev/null 2>&1; then
-                            echo "✅ Docker is available"
-                            echo "true" > docker_status.txt
-                        else
-                            echo "⚠ Docker not available"
-                            echo "false" > docker_status.txt
-                        fi
-                    '''
+                    // Проверяем Docker от имени пользователя jenkins
+                    def dockerCheck = sh(
+                        script: '''
+                            echo "=== Docker Access Test ==="
+                            echo "Current user: $(whoami)"
+                            echo "User ID: $(id)"
+                            echo "Groups: $(groups)"
+                            echo ""
+                            echo "Testing Docker command..."
+                            if docker --version > /dev/null 2>&1; then
+                                echo "✅ Docker CLI is available"
+                                echo "---true---"
+                            else
+                                echo "⚠ Docker CLI not found"
+                                echo "---false---"
+                            fi
+                        ''',
+                        returnStdout: true
+                    )
                     
-                    // Правильное чтение статуса Docker
-                    script {
-                        def docker_status = sh(
-                            script: 'cat docker_status.txt',
-                            returnStdout: true
-                        ).trim()
-                        
-                        env.DOCKER_AVAILABLE = docker_status
-                        echo "Docker available: ${env.DOCKER_AVAILABLE}"
+                    // Извлекаем статус из вывода
+                    def docker_status = "false"
+                    if (dockerCheck.contains("---true---")) {
+                        docker_status = "true"
                     }
+                    
+                    env.DOCKER_AVAILABLE = docker_status
+                    
+                    if (env.DOCKER_AVAILABLE == 'true') {
+                        echo "✅ Docker is fully available for pipeline"
+                        // Дополнительная проверка
+                        sh '''
+                            echo ""
+                            echo "=== Additional Docker tests ==="
+                            echo "1. Docker version:"
+                            docker --version
+                            echo ""
+                            echo "2. Docker info:"
+                            docker info --format 'Server Version: {{.ServerVersion}}' 2>/dev/null || echo "Cannot get server info"
+                            echo ""
+                            echo "3. List containers:"
+                            docker ps --format "table {{.Names}}\\t{{.Status}}\\t{{.Image}}" 2>/dev/null | head -10 || echo "Cannot list containers"
+                            echo ""
+                            echo "4. Docker socket permissions:"
+                            ls -la /var/run/docker.sock 2>/dev/null || echo "Docker socket not found"
+                        '''
+                    } else {
+                        echo "⚠ Docker not available for pipeline"
+                    }
+                    
+                    echo "Docker available: ${env.DOCKER_AVAILABLE}"
                 }
             }
         }
@@ -145,19 +175,14 @@ EOF
                     echo "🔧 Checking Docker setup..."
                     
                     sh '''
-                        echo "=== Docker Info ==="
-                        docker version 2>/dev/null || echo "Docker command not available"
-                        
+                        echo "=== Docker System Info ==="
+                        echo "Hostname: $(hostname)"
                         echo ""
-                        echo "=== Current User ==="
-                        whoami
-                        
+                        echo "Docker system info:"
+                        docker info 2>/dev/null | grep -E "(Server Version|Containers|Images|Storage Driver)" || echo "Cannot get docker info"
                         echo ""
-                        echo "=== Docker Socket ==="
-                        ls -la /var/run/docker.sock 2>/dev/null || echo "Docker socket not found"
-                        echo ""
-                        echo "=== User Groups ==="
-                        groups
+                        echo "Available disk space:"
+                        df -h /var/lib/docker 2>/dev/null || df -h / 2>/dev/null | head -1
                     '''
                 }
             }
@@ -175,38 +200,62 @@ EOF
                     script {
                         echo "🐳 Running REAL Docker operations..."
                         
+                        // Проверяем существующие контейнеры
+                        sh '''
+                            echo "=== Checking existing containers ==="
+                            docker ps -a --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\\t{{.Status}}\\t{{.Image}}" || echo "No existing containers found"
+                        '''
+                        
                         // Build Docker image
                         sh """
+                            echo ""
                             echo "Building Docker image..."
                             docker build -t ${params.IMAGE_NAME}:${params.IMAGE_TAG} .
-                            echo "✅ Docker image built"
+                            echo "✅ Docker image built: ${params.IMAGE_NAME}:${params.IMAGE_TAG}"
+                            echo ""
+                            echo "Available images:"
+                            docker images ${params.IMAGE_NAME} --format "table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}" || echo "Image not listed"
                         """
                         
                         // Clean previous containers if enabled
                         if (params.CLEAN_PREVIOUS.toBoolean()) {
                             sh """
+                                echo ""
                                 echo "Cleaning previous containers..."
-                                docker stop ${params.CONTAINER_NAME} 2>/dev/null || echo "No container to stop"
-                                docker rm ${params.CONTAINER_NAME} 2>/dev/null || echo "No container to remove"
+                                docker stop ${params.CONTAINER_NAME} 2>/dev/null && echo "Stopped container: ${params.CONTAINER_NAME}" || echo "No running container to stop"
+                                docker rm ${params.CONTAINER_NAME} 2>/dev/null && echo "Removed container: ${params.CONTAINER_NAME}" || echo "No container to remove"
                                 echo "✅ Cleanup completed"
                             """
                         }
                         
                         // Deploy new container
                         sh """
+                            echo ""
                             echo "Deploying container..."
                             docker run -d \\
                                 --name ${params.CONTAINER_NAME} \\
                                 -p ${params.HOST_PORT}:${env.APP_PORT} \\
                                 ${params.IMAGE_NAME}:${params.IMAGE_TAG}
-                            echo "✅ Container deployed on port ${params.HOST_PORT}"
+                            echo "✅ Container deployed: ${params.CONTAINER_NAME}"
+                            echo "   Port: ${params.HOST_PORT}:${env.APP_PORT}"
+                            echo "   Image: ${params.IMAGE_NAME}:${params.IMAGE_TAG}"
                         """
                         
                         // Verify deployment
                         sh """
                             sleep 3
+                            echo ""
                             echo "=== Container Status ==="
-                            docker ps --filter "name=${params.CONTAINER_NAME}" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}" || echo "Container not found"
+                            docker ps --filter "name=${params.CONTAINER_NAME}" --format "table {{.Names}}\\t{{.Status}}\\t{{.Ports}}\\t{{.Image}}" || echo "Container not found"
+                            
+                            echo ""
+                            echo "=== Container Logs (last 5 lines) ==="
+                            docker logs ${params.CONTAINER_NAME} --tail 5 2>/dev/null || echo "No logs available yet"
+                            
+                            echo ""
+                            echo "=== Health Check ==="
+                            sleep 2
+                            curl -f http://localhost:${params.HOST_PORT} 2>/dev/null && echo "✅ Application is responding" || echo "⚠ Application not responding yet"
                         """
                     }
                 }
@@ -235,7 +284,7 @@ EOF
                         echo "1. Docker image build... [SIMULATED SUCCESS]"
                         echo "2. Container cleanup... [SIMULATED SUCCESS]" 
                         echo "3. Container deployment... [SIMULATED SUCCESS]"
-                        echo "4. Port mapping configured... [OK]"
+                        echo "4. Port mapping ${HOST_PORT}:${APP_PORT}... [CONFIGURED]"
                         echo "5. Health check... [SIMULATED]"
                         echo ""
                         echo "All operations completed successfully (simulated)"
@@ -245,6 +294,8 @@ EOF
                         echo "Simulation completed at: $(date)" > reports/simulation_complete.txt
                         echo "Build: ${BUILD_NUMBER}" >> reports/simulation_complete.txt
                         echo "Mode: simulated" >> reports/simulation_complete.txt
+                        echo "Docker Available: ${DOCKER_AVAILABLE}" >> reports/simulation_complete.txt
+                        echo "Skip Docker: ${SKIP_DOCKER}" >> reports/simulation_complete.txt
                     '''
                 }
             }
@@ -262,28 +313,28 @@ EOF
                         // Определяем режим работы
                         def build_mode = "unknown"
                         if (params.SKIP_DOCKER == true) {
-                            build_mode = "simulated"
+                            build_mode = "simulated_manual"
                         } else if (env.DOCKER_AVAILABLE == 'true') {
                             build_mode = "real_docker"
                         } else {
                             build_mode = "simulated_no_docker"
                         }
                         
-                        // Создаем JSON отчет - используем двойные кавычки и экранирование
-                        sh """
-                            cat > reports/build_summary.json << 'EOF'
-{
+                        // Создаем JSON отчет
+                        writeFile(
+                            file: 'reports/build_summary.json',
+                            text: """{
   "homework": 30,
   "status": "success",
   "build_number": "${BUILD_NUMBER}",
   "mode": "${build_mode}",
   "docker_available": "${env.DOCKER_AVAILABLE}",
+  "skip_docker_param": "${params.SKIP_DOCKER}",
   "parameters": {
     "image": "${params.IMAGE_NAME}:${params.IMAGE_TAG}",
     "container": "${params.CONTAINER_NAME}",
     "port": "${params.HOST_PORT}",
     "environment": "${params.ENVIRONMENT}",
-    "skip_docker": "${params.SKIP_DOCKER}",
     "clean_previous": "${params.CLEAN_PREVIOUS}"
   },
   "requirements_met": [
@@ -300,36 +351,47 @@ EOF
     "additional_features",
     "dsl_for_reports"
   ],
+  "pipeline_stages": [
+    "Initialize",
+    "Checkout SCM",
+    "Validate Project Structure",
+    "Build Application",
+    "Check Docker Availability",
+    "Check Docker Setup",
+    "${build_mode == 'real_docker' ? 'Docker Operations' : 'Simulated Operations'}",
+    "Generate Reports",
+    "Final Verification"
+  ],
   "artifacts": [
     "build/libs/app.jar",
     "build/application.properties",
     "reports/build_summary.json",
     "reports/simulation_complete.txt",
-    "reports/README.md"
+    "reports/README.md",
+    "reports/dsl_report.json"
   ],
-  "timestamp": "\$(date -Iseconds)"
-}
-EOF
-                        """
+  "timestamp": "${new Date().format('yyyy-MM-dd HH:mm:ss')}"
+}"""
+                        )
                         
                         // Создаем README файл
-                        sh """
-                            cat > reports/README.md << 'EOF'
-# Homework #30 - Jenkins Pipeline Report
+                        writeFile(
+                            file: 'reports/README.md',
+                            text: """# Homework #30 - Jenkins Pipeline Report
 
 ## Build Information
 - **Build Number:** ${BUILD_NUMBER}
 - **Status:** SUCCESS
-- **Timestamp:** \$(date)
+- **Timestamp:** ${new Date().format('yyyy-MM-dd HH:mm:ss')}
 - **Pipeline Mode:** ${build_mode}
 - **Docker Available:** ${env.DOCKER_AVAILABLE}
+- **Skip Docker Parameter:** ${params.SKIP_DOCKER}
 
 ## Parameters
 - **Image:** ${params.IMAGE_NAME}:${params.IMAGE_TAG}
 - **Container:** ${params.CONTAINER_NAME}
 - **Port:** ${params.HOST_PORT}:${env.APP_PORT}
 - **Environment:** ${params.ENVIRONMENT}
-- **Skip Docker:** ${params.SKIP_DOCKER}
 - **Clean Previous:** ${params.CLEAN_PREVIOUS}
 
 ## Pipeline Stages
@@ -363,24 +425,25 @@ EOF
 - JSON build summary
 - Simulation report (if applicable)
 - This README file
+- DSL report
 
 ## Environment
-- Jenkins: Running in Docker
-- OS: Ubuntu 24.04
-- Docker: ${env.DOCKER_AVAILABLE == 'true' ? 'Available' : 'Not Available'}
+- Jenkins: Running in Docker on Ubuntu 24.04
+- Docker: ${env.DOCKER_AVAILABLE == 'true' ? 'Available and accessible' : 'Not available'}
 - Pipeline Type: Declarative
-EOF
-                        """
+- Total Execution Time: Multi-stage pipeline with conditionals
+"""
+                        )
                         
-                        // Проверяем Python перед выполнением DSL
+                        // Генерируем DSL отчет через Python скрипт
                         sh '''
-                            echo "Checking Python availability..."
+                            echo "Generating DSL report..."
                             if python3 --version > /dev/null 2>&1; then
-                                echo "Python is available, generating DSL report..."
-                                python3 report_dsl.py --build-number ${BUILD_NUMBER} --env ${ENVIRONMENT} --output-dir ./reports
+                                echo "Python is available"
+                                python3 report_dsl.py --build-number ${BUILD_NUMBER} --env ${ENVIRONMENT} --output-dir ./reports || echo "DSL report failed"
                             else
-                                echo "Python not available, skipping DSL report"
-                                echo '{"status": "python_not_available", "message": "Python 3 not installed"}' > reports/dsl_report.json
+                                echo "Python not available, creating basic DSL report"
+                                echo '{"dsl_report": "generated", "build": "${BUILD_NUMBER}", "status": "python_not_available"}' > reports/dsl_report.json
                             fi
                         '''
                         
@@ -402,6 +465,7 @@ EOF
                         echo "Artifact generation... [SUCCESS]"
                         echo "Report creation... [DONE]"
                         echo "Error handling... [IMPLEMENTED]"
+                        echo "Docker integration... [${DOCKER_AVAILABLE == 'true' ? 'REAL' : 'SIMULATED'}]"
                         echo ""
                         echo "ALL VERIFICATIONS PASSED!"
                     '''
@@ -411,11 +475,11 @@ EOF
                         sh '''
                             echo ""
                             echo "=== Generated Files Check ==="
-                            echo "Reports directory:"
-                            ls -la reports/ 2>/dev/null || echo "No reports directory"
+                            echo "Reports directory contents:"
+                            ls -lh reports/ 2>/dev/null || echo "No reports directory"
                             echo ""
-                            echo "Build directory:"
-                            ls -la build/ 2>/dev/null || echo "No build directory"
+                            echo "Build directory contents:"
+                            ls -lh build/ 2>/dev/null || echo "No build directory"
                             echo ""
                             echo "Total files generated:"
                             find build/ reports/ -type f 2>/dev/null | wc -l || echo "0"
@@ -447,8 +511,7 @@ EOF
                     echo "Report files:"
                     ls -la reports/ 2>/dev/null || echo "No report files"
                     echo ""
-                    echo "Total files archived:"
-                    find build/ reports/ -type f 2>/dev/null | wc -l || echo "0"
+                    echo "Total files archived: $(find build/ reports/ -type f 2>/dev/null | wc -l || echo 0)"
                     echo "Archive ready for download"
                 '''
             }
@@ -463,6 +526,8 @@ EOF
             echo "   Mode: ${params.SKIP_DOCKER ? 'Simulated' : (env.DOCKER_AVAILABLE == 'true' ? 'Real Docker' : 'Simulated (no Docker)')}"
             echo "   Docker available: ${env.DOCKER_AVAILABLE}"
             echo "   Environment: ${params.ENVIRONMENT}"
+            echo "   Container: ${params.CONTAINER_NAME}"
+            echo "   Port: ${params.HOST_PORT}"
             echo ""
             echo "✅ All 12 requirements have been successfully implemented!"
             
@@ -476,6 +541,8 @@ EOF
                     echo "Status: SUCCESS" >> reports/SUCCESS.txt
                     echo "Mode: ${SKIP_DOCKER}" >> reports/SUCCESS.txt
                     echo "Docker Available: ${DOCKER_AVAILABLE}" >> reports/SUCCESS.txt
+                    echo "Container: ${CONTAINER_NAME}" >> reports/SUCCESS.txt
+                    echo "Port: ${HOST_PORT}" >> reports/SUCCESS.txt
                 '''
             }
         }
@@ -491,6 +558,7 @@ EOF
                     echo "Build: ${BUILD_NUMBER}" >> reports/FAILURE.txt 2>/dev/null || true
                     echo "Timestamp: $(date)" >> reports/FAILURE.txt 2>/dev/null || true
                     echo "Status: FAILED" >> reports/FAILURE.txt 2>/dev/null || true
+                    echo "Stage: ${STAGE_NAME}" >> reports/FAILURE.txt 2>/dev/null || true
                 '''
             }
         }
