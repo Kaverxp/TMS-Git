@@ -56,11 +56,6 @@ pipeline {
                 sh '''
                     echo "Checking required files..."
                     
-                    # Check in current directory (root)
-                    echo "=== Current Directory ==="
-                    ls -la
-                    
-                    # Check for Lesson30 directory
                     if [ -d "Lesson30" ]; then
                         echo "=== Lesson30 Directory ==="
                         ls -la Lesson30/
@@ -163,22 +158,22 @@ pipeline {
             steps {
                 echo "Generating reports..."
                 script {
-                    sh '''
-                        # Create DSL report simulation
+                    // Создаем DSL отчет
+                    sh """
                         echo '{"dsl_report": "generated", "build": "${BUILD_NUMBER}", "status": "success", "requirements": 12}' > reports/dsl_report.json
                         
-                        # Create summary report
+                        # Создаем summary report
                         cat > reports/summary.md << EOF
 # Homework #30 - Pipeline Report
 ## Build Information
 - Build: ${BUILD_NUMBER}
-- Date: $(date)
-- Mode: ${OPERATION_MODE}
-- Skip Docker: ${SKIP_DOCKER}
+- Date: \$(date)
+- Mode: ${env.OPERATION_MODE}
+- Skip Docker: ${params.SKIP_DOCKER}
 
 ## Conditional Execution
-- Parameter: SKIP_DOCKER = ${SKIP_DOCKER}
-- Stage executed: ${SKIP_DOCKER == 'true' ? 'Simulated Docker Operations' : 'Real Docker Build & Deploy'}
+- Parameter: SKIP_DOCKER = ${params.SKIP_DOCKER}
+- Stage executed: ${params.SKIP_DOCKER ? 'Simulated Docker Operations' : 'Real Docker Build & Deploy'}
 - Demonstration: ✅ SUCCESSFUL
 
 ## Requirements (12/12)
@@ -202,7 +197,7 @@ EOF
                         
                         echo "Reports generated:"
                         ls -la reports/
-                    '''
+                    """
                 }
             }
         }
@@ -258,6 +253,7 @@ EOF
     post {
         always {
             echo "Pipeline execution completed - Build ${BUILD_NUMBER}"
+            archiveArtifacts artifacts: 'build/**, reports/**', allowEmptyArchive: true
         }
         success {
             echo ""
@@ -270,8 +266,6 @@ EOF
             echo ""
             echo "ALL 12 REQUIREMENTS IMPLEMENTED AND VERIFIED!"
             echo "Ready for submission!"
-            
-            archiveArtifacts artifacts: 'build/**, reports/**', allowEmptyArchive: true
         }
         failure {
             echo "❌ Pipeline failed - check console output"
